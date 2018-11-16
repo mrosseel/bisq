@@ -23,6 +23,7 @@ repositories {
 dependencies {
     compile project(':assets')
     compile project(':p2p')
+    compile 'javax.validation:validation-api:1.1.0.Final'
     compile 'net.sf.jopt-simple:jopt-simple:5.0.3'
     compile('network.bisq.btcd-cli4j:btcd-cli4j-core:3864e1c4') {
         exclude(module: 'slf4j-api')
