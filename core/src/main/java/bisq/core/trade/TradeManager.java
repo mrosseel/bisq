@@ -24,16 +24,18 @@ import bisq.core.btc.wallet.BsqWalletService;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.TradeWalletService;
 import bisq.core.filter.FilterManager;
+import bisq.core.locale.CurrencyUtil;
+import bisq.core.locale.Res;
 import bisq.core.offer.Offer;
 import bisq.core.offer.OfferPayload;
 import bisq.core.offer.OpenOffer;
 import bisq.core.offer.OpenOfferManager;
 import bisq.core.offer.availability.OfferAvailabilityModel;
 import bisq.core.payment.AccountAgeWitnessService;
+import bisq.core.payment.PaymentAccount;
 import bisq.core.provider.price.PriceFeedService;
 import bisq.core.trade.closed.ClosedTradableManager;
 import bisq.core.trade.failed.FailedTradesManager;
-import bisq.core.trade.handlers.TradeResultHandler;
 import bisq.core.trade.messages.PayDepositRequest;
 import bisq.core.trade.messages.TradeMessage;
 import bisq.core.trade.statistics.ReferralIdService;
@@ -86,6 +88,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -98,7 +101,14 @@ import lombok.Setter;
 
 import org.jetbrains.annotations.NotNull;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+
+import static bisq.core.payment.PaymentAccountUtil.isPaymentAccountValidForOffer;
+
+
+
+import javax.validation.ValidationException;
 
 public class TradeManager implements PersistedDataHost {
     private static final Logger log = LoggerFactory.getLogger(TradeManager.class);
@@ -402,47 +412,134 @@ public class TradeManager implements PersistedDataHost {
     }
 
     // First we check if offer is still available then we create the trade with the protocol
-    public void onTakeOffer(Coin amount,
-                            Coin txFee,
-                            Coin takerFee,
-                            boolean isCurrencyForTakerFeeBtc,
-                            long tradePrice,
-                            Coin fundsNeededForTrade,
-                            Offer offer,
-                            String paymentAccountId,
-                            boolean useSavingsWallet,
-                            TradeResultHandler tradeResultHandler,
-                            ErrorMessageHandler errorMessageHandler) {
+    public CompletableFuture<Trade> onTakeOffer(Coin amount,
+                                               Coin txFee,
+                                               Coin takerFee,
+                                               boolean isCurrencyForTakerFeeBtc,
+                                               long tradePrice,
+                                               Coin fundsNeededForTrade,
+                                               Offer offer,
+                                               String paymentAccountId,
+                                               boolean useSavingsWallet) {
+        /**
+         * - offer must not be null
+         * - offer currencyCode must not be banned
+         * - offer payment method must not be banned
+         * - offer id must not be banned
+         * - offer maker node address must not be banned
+         * - offer payment method must not be null
+         * - amount must be positive non null (although it seems that if it is zero then no exception is thrown)
+         * - amount must be less than or equal offer amount
+         * - txFee must be positive non null (although it seems that if it is zero then no exception is thrown)
+         * - takerFee must be positive non null (although it seems that if it is zero then no exception is thrown)
+         * - tradePrice must be positive non null
+         * - offer must be in available state
+         * - paymentAccountId should be non null, account for that id should exist and be compatible with offer
+         * - tradeResultHandler must not be null
+         * - ErrorMessageHandler should not be null
+         * - TODO actually instead of tradeResultHandler and errorMessageHandler this method should return completable future
+         * - TODO fundsNeededForTrade should be calculated here I think
+         * - TODO fundsNeededForTrade should be long as it is used in this form only
+         * - TODO check if user has enough funds here
+         * - TODO instead of coin we might use long
+         */
+        final CompletableFuture<Trade> completableFuture = new CompletableFuture<>();
+         try {
+             validateOnTakeOffer(amount, txFee, takerFee, tradePrice, offer, paymentAccountId);
+         } catch(Exception e) {
+             completableFuture.completeExceptionally(e);
+             return completableFuture;
+         }
         final OfferAvailabilityModel model = getOfferAvailabilityModel(offer);
-        offer.checkOfferAvailability(model,
-                () -> {
-                    if (offer.getState() == Offer.State.AVAILABLE)
-                        createTrade(amount,
-                                txFee,
-                                takerFee,
-                                isCurrencyForTakerFeeBtc,
-                                tradePrice,
-                                fundsNeededForTrade,
-                                offer,
-                                paymentAccountId,
-                                useSavingsWallet,
-                                model,
-                                tradeResultHandler);
+        offer.checkOfferAvailability(model, () -> {
+//            TODO what if offer is in invalid state?
+//            TODO what if exception is thrown inside createTrade?
+                    try {
+                        if (offer.getState() == Offer.State.AVAILABLE) {
+                            final Trade trade = createTrade(amount,
+                                    txFee,
+                                    takerFee,
+                                    isCurrencyForTakerFeeBtc,
+                                    tradePrice,
+                                    fundsNeededForTrade,
+                                    offer,
+                                    paymentAccountId,
+                                    useSavingsWallet,
+                                    model);
+                            completableFuture.complete(trade);
+                        } else {
+                            throw new ValidationException("Offer not available");
+                        }
+                    } catch (Exception e) {
+                        completableFuture.completeExceptionally(e);
+                    }
                 },
-                errorMessageHandler::handleErrorMessage);
+                errorMessage -> completableFuture.completeExceptionally(new TradeFailedException(errorMessage)));
+        return completableFuture;
     }
 
-    private void createTrade(Coin amount,
-                             Coin txFee,
-                             Coin takerFee,
-                             boolean isCurrencyForTakerFeeBtc,
-                             long tradePrice,
-                             Coin fundsNeededForTrade,
-                             Offer offer,
-                             String paymentAccountId,
-                             boolean useSavingsWallet,
-                             OfferAvailabilityModel model,
-                             TradeResultHandler tradeResultHandler) {
+    private void validateOnTakeOffer(Coin amount,
+                                     Coin txFee,
+                                     Coin takerFee,
+                                     long tradePrice,
+                                     Offer offer,
+                                     String paymentAccountId) {
+        if (null == amount || !Coin.ZERO.isLessThan(amount)) {
+            throw new ValidationException("Amount must be a positive number");
+        }
+        if (null == txFee || !Coin.ZERO.isLessThan(txFee)) {
+            throw new ValidationException("Transaction fee must be a positive number");
+        }
+        if (null == takerFee || !Coin.ZERO.isLessThan(takerFee)) {
+            throw new ValidationException("Taker fee must be a positive number");
+        }
+        if (tradePrice <= 0) {
+            throw new ValidationException("Trade price must be a positive number");
+        }
+        final PaymentAccount paymentAccount = user.getPaymentAccount(paymentAccountId);
+        if (null == paymentAccount) {
+            throw new ValidationException("Payment account for given id does not exist: " + paymentAccountId);
+        }
+        if (null == offer) {
+            throw new ValidationException("Offer must not be null");
+        }
+        if (amount.isGreaterThan(offer.getAmount())) {
+            throw new ValidationException("Taken amount must not be higher than offer amount");
+        }
+        final String currencyCode = offer.getCurrencyCode();
+        if (!CurrencyUtil.getTradeCurrency(currencyCode).isPresent()) {
+            throw new ValidationException("No such currency: " + currencyCode);
+        }
+        if (filterManager.isCurrencyBanned(currencyCode)) {
+            throw new ValidationException(Res.get("offerbook.warning.currencyBanned"));
+        }
+        if (filterManager.isPaymentMethodBanned(offer.getPaymentMethod())) {
+            throw new ValidationException(Res.get("offerbook.warning.paymentMethodBanned"));
+        }
+        if (filterManager.isOfferIdBanned(offer.getId())) {
+            throw new ValidationException(Res.get("offerbook.warning.offerBlocked"));
+        }
+        if (filterManager.isNodeAddressBanned(offer.getMakerNodeAddress())) {
+            throw new ValidationException(Res.get("offerbook.warning.nodeBlocked"));
+        }
+        if (offer.getMakerNodeAddress().equals(p2PService.getAddress())) {
+            throw new ValidationException("Taker's address same as maker's");
+        }
+        if (!isPaymentAccountValidForOffer(offer, paymentAccount)) {
+            throw new ValidationException("PaymentAccount is not valid for offer, needs " + offer.getCurrencyCode());
+        }
+    }
+
+    private Trade createTrade(@Nonnull Coin amount,
+                              @Nonnull Coin txFee,
+                              @Nonnull Coin takerFee,
+                              boolean isCurrencyForTakerFeeBtc,
+                              long tradePrice,
+                              @Nonnull Coin fundsNeededForTrade,
+                              @Nonnull Offer offer,
+                              @Nonnull String paymentAccountId,
+                              boolean useSavingsWallet,
+                              @Nonnull OfferAvailabilityModel model) {
         Trade trade;
         if (offer.isBuyOffer())
             trade = new SellerAsTakerTrade(offer,
@@ -473,7 +570,7 @@ public class TradeManager implements PersistedDataHost {
 
         tradableList.add(trade);
         ((TakerTrade) trade).takeAvailableOffer();
-        tradeResultHandler.handleResult(trade);
+        return trade;
     }
 
     private OfferAvailabilityModel getOfferAvailabilityModel(Offer offer) {

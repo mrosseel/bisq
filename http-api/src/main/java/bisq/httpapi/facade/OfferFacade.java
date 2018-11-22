@@ -11,17 +11,25 @@ import bisq.core.offer.OpenOffer;
 import bisq.core.offer.OpenOfferManager;
 import bisq.core.offer.TakerUtil;
 import bisq.core.offer.TxFeeEstimation;
-import bisq.core.payment.PaymentAccount;
 import bisq.core.provider.fee.FeeService;
 import bisq.core.trade.Trade;
 import bisq.core.trade.TradeManager;
 import bisq.core.user.Preferences;
-import bisq.core.user.User;
 
 import bisq.network.p2p.P2PService;
 
 import bisq.common.UserThread;
 import bisq.common.util.Tuple2;
+
+import bisq.httpapi.exceptions.AmountTooHighException;
+import bisq.httpapi.exceptions.InsufficientMoneyException;
+import bisq.httpapi.exceptions.NotBootstrappedException;
+import bisq.httpapi.exceptions.NotFoundException;
+import bisq.httpapi.model.InputDataForOffer;
+import bisq.httpapi.model.OfferDetail;
+import bisq.httpapi.model.PriceType;
+import bisq.httpapi.service.endpoint.OfferBuilder;
+import bisq.httpapi.util.ResourceHelper;
 
 import org.bitcoinj.core.Coin;
 
@@ -31,24 +39,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-import static bisq.core.payment.PaymentAccountUtil.isPaymentAccountValidForOffer;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.stream.Collectors.toList;
 
 
 
-import bisq.httpapi.exceptions.AmountTooHighException;
-import bisq.httpapi.exceptions.IncompatiblePaymentAccountException;
-import bisq.httpapi.exceptions.InsufficientMoneyException;
-import bisq.httpapi.exceptions.NotBootstrappedException;
-import bisq.httpapi.exceptions.NotFoundException;
-import bisq.httpapi.exceptions.OfferTakerSameAsMakerException;
-import bisq.httpapi.exceptions.PaymentAccountNotFoundException;
-import bisq.httpapi.model.InputDataForOffer;
-import bisq.httpapi.model.OfferDetail;
-import bisq.httpapi.model.PriceType;
-import bisq.httpapi.service.endpoint.OfferBuilder;
-import bisq.httpapi.util.ResourceHelper;
 import javax.validation.ValidationException;
 
 public class OfferFacade {
@@ -60,7 +55,6 @@ public class OfferFacade {
     private final P2PService p2PService;
     private final Preferences preferences;
     private final FeeService feeService;
-    private final User user;
     private final BtcWalletService btcWalletService;
     private final BsqWalletService bsqWalletService;
 
@@ -72,7 +66,6 @@ public class OfferFacade {
                        P2PService p2PService,
                        Preferences preferences,
                        FeeService feeService,
-                       User user,
                        BtcWalletService btcWalletService,
                        BsqWalletService bsqWalletService) {
         this.offerBookService = offerBookService;
@@ -82,7 +75,6 @@ public class OfferFacade {
         this.p2PService = p2PService;
         this.preferences = preferences;
         this.feeService = feeService;
-        this.user = user;
         this.btcWalletService = btcWalletService;
         this.bsqWalletService = bsqWalletService;
     }
@@ -190,22 +182,6 @@ public class OfferFacade {
             return ResourceHelper.completeExceptionally(futureResult, e);
         }
 
-        if (offer.getMakerNodeAddress().equals(p2PService.getAddress())) {
-            return ResourceHelper.completeExceptionally(futureResult, new OfferTakerSameAsMakerException("Taker's address same as maker's"));
-        }
-
-        // check the paymentAccountId is valid
-        PaymentAccount paymentAccount = user.getPaymentAccount(paymentAccountId);
-        if (paymentAccount == null) {
-            return ResourceHelper.completeExceptionally(futureResult, new PaymentAccountNotFoundException("Could not find payment account with id: " + paymentAccountId));
-        }
-
-        // check the paymentAccountId is compatible with the offer
-        if (!isPaymentAccountValidForOffer(offer, paymentAccount)) {
-            final String errorMessage = "PaymentAccount is not valid for offer, needs " + offer.getCurrencyCode();
-            return ResourceHelper.completeExceptionally(futureResult, new IncompatiblePaymentAccountException(errorMessage));
-        }
-
         // check the amount is within the range
         Coin amountAsCoin = Coin.valueOf(amount);
         // workaround because TradeTask does not have an error handler to notify us that something went wrong
@@ -215,9 +191,8 @@ public class OfferFacade {
         }
 
         // check that the price is correct ??
-
-        Coin txFeeFromFeeService = feeService.getTxFee(380);
-        Coin fundsNeededForTaker = TakerUtil.getFundsNeededForTakeOffer(amountAsCoin, txFeeFromFeeService, txFeeFromFeeService, offer);
+        Coin txFee = feeService.getTxFee(380);
+        Coin fundsNeededForTaker = TakerUtil.getFundsNeededForTakeOffer(amountAsCoin, txFee, txFee, offer);
         Coin takerFee = TakerUtil.getTakerFee(amountAsCoin, preferences, bsqWalletService);
         checkNotNull(takerFee, "takerFee must not be null");
         Tuple2<Coin, Integer> estimatedFeeAndTxSize = TxFeeEstimation.getEstimatedFeeAndTxSizeForTaker(fundsNeededForTaker,
@@ -225,22 +200,18 @@ public class OfferFacade {
                 feeService,
                 btcWalletService,
                 preferences);
-        txFeeFromFeeService = estimatedFeeAndTxSize.first;
-        checkNotNull(txFeeFromFeeService, "txFeeFromFeeService must not be null");
+        txFee = estimatedFeeAndTxSize.first;
+        checkNotNull(txFee, "txFee must not be null");
 
         boolean currencyForTakerFeeBtc = TakerUtil.isCurrencyForTakerFeeBtc(amountAsCoin, preferences, bsqWalletService);
-        tradeManager.onTakeOffer(amountAsCoin,
-                txFeeFromFeeService,
+        return tradeManager.onTakeOffer(amountAsCoin,
+                txFee,
                 takerFee,
                 currencyForTakerFeeBtc,
                 offer.getPrice().getValue(),
                 fundsNeededForTaker,
                 offer,
-                paymentAccount.getId(),
-                useSavingsWallet,
-                futureResult::complete,
-                error -> futureResult.completeExceptionally(new RuntimeException(error))
-        );
-        return futureResult;
+                paymentAccountId,
+                useSavingsWallet);
     }
 }
