@@ -18,7 +18,6 @@
 package bisq.core.app;
 
 import bisq.core.arbitration.ArbitratorManager;
-import bisq.core.btc.BaseCurrencyNetwork;
 import bisq.core.btc.BtcOptionKeys;
 import bisq.core.btc.setup.RegTestHost;
 import bisq.core.btc.setup.WalletsSetup;
@@ -45,7 +44,6 @@ import bisq.common.proto.persistable.PersistedDataHost;
 import bisq.common.setup.GracefulShutDownHandler;
 import bisq.common.storage.CorruptedDatabaseFilesHandler;
 import bisq.common.storage.Storage;
-import bisq.common.util.Utilities;
 
 import org.springframework.core.env.JOptCommandLinePropertySource;
 import org.springframework.util.StringUtils;
@@ -53,6 +51,9 @@ import org.springframework.util.StringUtils;
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
+import joptsimple.util.PathConverter;
+import joptsimple.util.PathProperties;
+import joptsimple.util.RegexMatcher;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
@@ -74,10 +75,7 @@ import static java.lang.String.format;
 import static java.lang.String.join;
 
 @Slf4j
-public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSetup.BisqSetupCompleteListener {
-    static {
-        Utilities.removeCryptographyRestrictions();
-    }
+public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSetup.BisqSetupCompleteListener  {
 
     protected Injector injector;
     protected AppModule module;
@@ -97,9 +95,7 @@ public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSet
         try {
             options = parser.parse(args);
         } catch (OptionException ex) {
-            System.out.println("error: " + ex.getMessage());
-            System.out.println();
-            parser.printHelpOn(System.out);
+            System.err.println("error: " + ex.getMessage());
             System.exit(EXIT_FAILURE);
             return false;
         }
@@ -130,9 +126,7 @@ public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSet
                 return;
             }
         } catch (OptionException ex) {
-            System.out.println("error: " + ex.getMessage());
-            System.out.println();
-            parser.printHelpOn(System.out);
+            System.err.println("error: " + ex.getMessage());
             System.exit(EXIT_FAILURE);
             return;
         }
@@ -157,7 +151,29 @@ public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSet
     protected abstract void configUserThread();
 
     protected void setupEnvironment(OptionSet options) {
-        bisqEnvironment = getBisqEnvironment(options);
+        /*
+         * JOptSimple does support input parsing. However, doing only options = parser.parse(args) isn't enough to trigger the parsing.
+         * The parsing is done when the actual value is going to be retrieved, i.e. options.valueOf(attributename).
+         *
+         * In order to keep usability high, we work around the aforementioned characteristics by catching the exception below
+         * (valueOf is called somewhere in getBisqEnvironment), thus, neatly inform the user of a ill-formed parameter and stop execution.
+         *
+         * Might be changed when the project features more user parameters meant for the user.
+         */
+        try {
+            bisqEnvironment = getBisqEnvironment(options);
+        } catch (OptionException e) {
+            // unfortunately, the OptionArgumentConversionException is not visible so we cannot catch only those.
+            // hence, workaround
+            if(e.getCause() != null)
+                // get something like "Error while parsing application parameter '--torrcFile': File [/path/to/file] does not exist"
+                System.err.println("Error while parsing application parameter '--" + e.options().get(0) + "': " + e.getCause().getMessage());
+            else
+                System.err.println("Error while parsing application parameter '--" + e.options().get(0));
+
+            // we only tried to load some config until now, so no graceful shutdown is required
+            System.exit(1);
+        }
     }
 
     protected void configCoreSetup(OptionSet options) {
@@ -209,11 +225,7 @@ public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSet
 
     protected void setupDevEnv() {
         DevEnv.setDevMode(injector.getInstance(Key.get(Boolean.class, Names.named(CommonOptionKeys.USE_DEV_MODE))));
-
-        BaseCurrencyNetwork baseCurrencyNetwork = BisqEnvironment.getBaseCurrencyNetwork();
-        boolean isRegTestOrTestNet = (baseCurrencyNetwork.isTestnet() || baseCurrencyNetwork.isRegtest());
-        boolean isDaoActivatedOptionSet = injector.getInstance(Key.get(Boolean.class, Names.named(DaoOptionKeys.DAO_ACTIVATED)));
-        DevEnv.setDaoActivated(isDaoActivatedOptionSet || isRegTestOrTestNet);
+        DevEnv.setDaoActivated(BisqEnvironment.isDaoActivated(bisqEnvironment));
     }
 
     private void setCorruptedDataBaseFilesHandler() {
@@ -333,6 +345,32 @@ public abstract class BisqExecutable implements GracefulShutDownHandler, BisqSet
         parser.accepts(NetworkOptionKeys.SOCKS_5_PROXY_HTTP_ADDRESS,
                 description("A proxy address to be used for Http requests (should be non-Tor). [host:port]", ""))
                 .withRequiredArg();
+        parser.accepts(NetworkOptionKeys.TORRC_FILE,
+                description("An existing torrc-file to be sourced for Tor. Note that torrc-entries, which are critical to Bisqs flawless operation, cannot be overwritten.", ""))
+                .withRequiredArg()
+                .withValuesConvertedBy(new PathConverter(PathProperties.FILE_EXISTING, PathProperties.READABLE));
+        parser.accepts(NetworkOptionKeys.TORRC_OPTIONS,
+                description("A list of torrc-entries to amend to Bisqs torrc. Note that torrc-entries, which are critical to Bisqs flawless operation, cannot be overwritten. [torrc options line, torrc option, ...]", ""))
+                .withRequiredArg()
+                .withValuesConvertedBy(RegexMatcher.regex("^([^\\s,]+\\s[^,]+,?\\s*)+$"));
+        parser.accepts(NetworkOptionKeys.EXTERNAL_TOR_CONTROL_PORT,
+                description("The control port of an already running Tor service to be used by Bisq [port].", ""))
+                .availableUnless(NetworkOptionKeys.TORRC_FILE, NetworkOptionKeys.TORRC_OPTIONS)
+                .withRequiredArg()
+                .ofType(int.class);
+        parser.accepts(NetworkOptionKeys.EXTERNAL_TOR_PASSWORD,
+                description("The password for controlling the already running Tor service.", ""))
+                .availableIf(NetworkOptionKeys.EXTERNAL_TOR_CONTROL_PORT)
+                .withRequiredArg();
+        parser.accepts(NetworkOptionKeys.EXTERNAL_TOR_COOKIE_FILE,
+                description("The cookie file for authenticating against the already running Tor service. Use in conjunction with --" + NetworkOptionKeys.EXTERNAL_TOR_USE_SAFECOOKIE, ""))
+                .availableIf(NetworkOptionKeys.EXTERNAL_TOR_CONTROL_PORT)
+                .availableUnless(NetworkOptionKeys.EXTERNAL_TOR_PASSWORD)
+                .withRequiredArg()
+                .withValuesConvertedBy(new PathConverter(PathProperties.FILE_EXISTING, PathProperties.READABLE));
+        parser.accepts(NetworkOptionKeys.EXTERNAL_TOR_USE_SAFECOOKIE,
+                description("Use the SafeCookie method when authenticating to the already running Tor service.", ""))
+                .availableIf(NetworkOptionKeys.EXTERNAL_TOR_COOKIE_FILE);
 
         //AppOptionKeys
         parser.accepts(AppOptionKeys.USER_DATA_DIR_KEY,
