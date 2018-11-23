@@ -25,6 +25,7 @@ import bisq.core.btc.model.AddressEntry;
 import bisq.core.btc.wallet.BsqWalletService;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.Restrictions;
+import bisq.core.btc.wallet.TradeWalletService;
 import bisq.core.filter.FilterManager;
 import bisq.core.locale.CurrencyUtil;
 import bisq.core.locale.Res;
@@ -35,7 +36,6 @@ import bisq.core.offer.Offer;
 import bisq.core.offer.OfferPayload;
 import bisq.core.offer.OfferUtil;
 import bisq.core.offer.OpenOfferManager;
-import bisq.core.offer.TxFeeEstimation;
 import bisq.core.payment.AccountAgeWitnessService;
 import bisq.core.payment.HalCashAccount;
 import bisq.core.payment.PaymentAccount;
@@ -46,15 +46,17 @@ import bisq.core.trade.statistics.ReferralIdService;
 import bisq.core.user.Preferences;
 import bisq.core.user.User;
 import bisq.core.util.BSFormatter;
+import bisq.core.util.BsqFormatter;
 
 import bisq.network.p2p.P2PService;
 
 import bisq.common.app.Version;
 import bisq.common.crypto.KeyRing;
-import bisq.common.util.Tuple2;
 import bisq.common.util.Utilities;
 
+import org.bitcoinj.core.Address;
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.Transaction;
 
 import com.google.inject.Inject;
@@ -97,9 +99,11 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
     final String shortOfferId;
     private final FilterManager filterManager;
     private final AccountAgeWitnessService accountAgeWitnessService;
+    private final TradeWalletService tradeWalletService;
     private final FeeService feeService;
     private final ReferralIdService referralIdService;
-    private final BSFormatter formatter;
+    private final BsqFormatter bsqFormatter;
+    private final BSFormatter btcFormatter;
     private final String offerId;
     private final BalanceListener btcBalanceListener;
     private final SetChangeListener<PaymentAccount> paymentAccountsChangeListener;
@@ -128,6 +132,7 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
     protected Coin txFeeFromFeeService;
     protected boolean marketPriceAvailable;
     protected int feeTxSize = 260; // size of typical tx with 1 input
+    protected int feeTxSizeEstimationRecursionCounter;
     protected boolean allowAmountUpdate = true;
 
 
@@ -139,9 +144,9 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
     public MutableOfferDataModel(OpenOfferManager openOfferManager, BtcWalletService btcWalletService, BsqWalletService bsqWalletService,
                                  Preferences preferences, User user, KeyRing keyRing, P2PService p2PService,
                                  PriceFeedService priceFeedService, FilterManager filterManager,
-                                 AccountAgeWitnessService accountAgeWitnessService, FeeService feeService,
-                                 ReferralIdService referralIdService,
-                                 BSFormatter formatter) {
+                                 AccountAgeWitnessService accountAgeWitnessService, TradeWalletService tradeWalletService,
+                                 FeeService feeService, ReferralIdService referralIdService, BsqFormatter bsqFormatter,
+                                 BSFormatter btcFormatter) {
         super(btcWalletService);
 
         this.openOfferManager = openOfferManager;
@@ -153,9 +158,11 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
         this.priceFeedService = priceFeedService;
         this.filterManager = filterManager;
         this.accountAgeWitnessService = accountAgeWitnessService;
+        this.tradeWalletService = tradeWalletService;
         this.feeService = feeService;
         this.referralIdService = referralIdService;
-        this.formatter = formatter;
+        this.bsqFormatter = bsqFormatter;
+        this.btcFormatter = btcFormatter;
 
         offerId = Utilities.getRandomPrefix(5, 8) + "-" +
                 UUID.randomUUID().toString() + "-" +
@@ -394,14 +401,57 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
 
     // This works only if we have already funds in the wallet
     public void estimateTxSize() {
-        Coin fundsNeededForMaker = OfferUtil.getFundsNeededForOffer(amount.get(), buyerSecurityDeposit.get(), direction);
-        Tuple2<Coin, Integer> estimatedFeeAndTxSize = TxFeeEstimation.getEstimatedFeeAndTxSizeForMaker(fundsNeededForMaker,
-                getMakerFee(),
-                feeService,
-                btcWalletService,
-                preferences);
-        txFeeFromFeeService = estimatedFeeAndTxSize.first;
-        feeTxSize = estimatedFeeAndTxSize.second;
+        txFeeFromFeeService = feeService.getTxFee(feeTxSize);
+        Address fundingAddress = btcWalletService.getFreshAddressEntry().getAddress();
+        Address reservedForTradeAddress = btcWalletService.getOrCreateAddressEntry(offerId, AddressEntry.Context.RESERVED_FOR_TRADE).getAddress();
+        Address changeAddress = btcWalletService.getFreshAddressEntry().getAddress();
+
+        Coin reservedFundsForOffer = getSecurityDeposit();
+        if (!isBuyOffer())
+            reservedFundsForOffer = reservedFundsForOffer.add(amount.get());
+
+        checkNotNull(user.getAcceptedArbitrators(), "user.getAcceptedArbitrators() must not be null");
+        checkArgument(!user.getAcceptedArbitrators().isEmpty(), "user.getAcceptedArbitrators() must not be empty");
+        String dummyArbitratorAddress = user.getAcceptedArbitrators().get(0).getBtcAddress();
+        try {
+            log.info("We create a dummy tx to see if our estimated size is in the accepted range. feeTxSize={}," +
+                            " txFee based on feeTxSize: {}, recommended txFee is {} sat/byte",
+                    feeTxSize, txFeeFromFeeService.toFriendlyString(), feeService.getTxFeePerByte());
+            Transaction tradeFeeTx = tradeWalletService.estimateBtcTradingFeeTxSize(
+                    fundingAddress,
+                    reservedForTradeAddress,
+                    changeAddress,
+                    reservedFundsForOffer,
+                    true,
+                    getMakerFee(),
+                    txFeeFromFeeService,
+                    dummyArbitratorAddress);
+
+            final int txSize = tradeFeeTx.bitcoinSerialize().length;
+            // use feeTxSizeEstimationRecursionCounter to avoid risk for endless loop
+            if (txSize > feeTxSize * 1.2 && feeTxSizeEstimationRecursionCounter < 10) {
+                feeTxSizeEstimationRecursionCounter++;
+                log.info("txSize is {} bytes but feeTxSize used for txFee calculation was {} bytes. We try again with an " +
+                        "adjusted txFee to reach the target tx fee.", txSize, feeTxSize);
+                feeTxSize = txSize;
+                txFeeFromFeeService = feeService.getTxFee(feeTxSize);
+                // lets try again with the adjusted txSize and fee.
+                estimateTxSize();
+            } else {
+                log.info("feeTxSize {} bytes", feeTxSize);
+                log.info("txFee based on estimated size: {}, recommended txFee is {} sat/byte",
+                        txFeeFromFeeService.toFriendlyString(), feeService.getTxFeePerByte());
+            }
+        } catch (InsufficientMoneyException e) {
+            // If we need to fund from an external wallet we can assume we only have 1 input (260 bytes).
+            log.warn("We cannot do the fee estimation because there are not enough funds in the wallet. This is expected " +
+                    "if the user pays from an external wallet. In that case we use an estimated tx size of 260 bytes.");
+            feeTxSize = 260;
+            txFeeFromFeeService = feeService.getTxFee(feeTxSize);
+            log.info("feeTxSize {} bytes", feeTxSize);
+            log.info("txFee based on estimated size: {}, recommended txFee is {} sat/byte",
+                    txFeeFromFeeService.toFriendlyString(), feeService.getTxFeePerByte());
+        }
     }
 
     void onPlaceOffer(Offer offer, TransactionResultHandler resultHandler) {
@@ -560,7 +610,7 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
     }
 
     boolean isMakerFeeValid() {
-        return preferences.isPayFeeInBtc() || isBsqForFeeAvailable();
+        return preferences.getPayFeeInBtc() || isBsqForFeeAvailable();
     }
 
     long getMaxTradeLimit() {
@@ -604,7 +654,7 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
                 !price.get().isZero() &&
                 allowAmountUpdate) {
             try {
-                Coin value = formatter.reduceTo4Decimals(price.get().getAmountByVolume(volume.get()));
+                Coin value = btcFormatter.reduceTo4Decimals(price.get().getAmountByVolume(volume.get()));
                 if (isHalCashAccount())
                     value = OfferUtil.getAdjustedAmountForHalCash(value, price.get(), getMaxTradeLimit());
                 else if (CurrencyUtil.isFiatCurrency(tradeCurrencyCode.get()))
@@ -640,7 +690,7 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
     }
 
     public boolean isBuyOffer() {
-        return OfferUtil.isBuyOffer(direction);
+        return OfferUtil.isBuyOffer(getDirection());
     }
 
     public Coin getTxFee() {
@@ -740,12 +790,24 @@ public abstract class MutableOfferDataModel extends OfferDataModel implements Bs
         return OfferUtil.getMakerFee(bsqWalletService, preferences, amount.get(), marketPriceAvailable, marketPriceMargin);
     }
 
+    public Coin getMakerFeeInBtc() {
+        return OfferUtil.getMakerFee(true, amount.get(), marketPriceAvailable, marketPriceMargin);
+    }
+
+    public Coin getMakerFeeInBsq() {
+        return OfferUtil.getMakerFee(false, amount.get(), marketPriceAvailable, marketPriceMargin);
+    }
+
     public boolean isCurrencyForMakerFeeBtc() {
         return OfferUtil.isCurrencyForMakerFeeBtc(preferences, bsqWalletService, amount.get(), marketPriceAvailable, marketPriceMargin);
     }
 
+    public boolean isPreferredFeeCurrencyBtc() {
+        return preferences.isPayFeeInBtc();
+    }
+
     public boolean isBsqForFeeAvailable() {
-        return OfferUtil.isBsqForFeeAvailable(bsqWalletService, amount.get(), marketPriceAvailable, marketPriceMargin);
+        return OfferUtil.isBsqForMakerFeeAvailable(bsqWalletService, amount.get(), marketPriceAvailable, marketPriceMargin);
     }
 
     public boolean isHalCashAccount() {
