@@ -106,10 +106,7 @@ public class RpcService {
         boolean isTestnet = BisqEnvironment.getBaseCurrencyNetwork().isTestnet();
         boolean isDaoBetaNet = BisqEnvironment.getBaseCurrencyNetwork().isDaoBetaNet();
         this.rpcHost = isHostSet ? rpcHost : "127.0.0.1";
-        this.rpcPort = isPortSet ? rpcPort :
-                isMainnet || isDaoBetaNet ? "8332" :
-                        isTestnet ? "18332" :
-                                "18443"; // regtest
+        this.rpcPort = isPortSet ? rpcPort : isMainnet || isDaoBetaNet ? "8332" : isTestnet ? "18332" : "18443"; // regtest
         boolean isBlockPortSet = rpcBlockPort != null && !rpcBlockPort.isEmpty();
         boolean isBlockHostSet = rpcBlockHost != null && !rpcBlockHost.isEmpty();
         this.rpcBlockPort = isBlockPortSet ? rpcBlockPort : "5125";
@@ -124,10 +121,7 @@ public class RpcService {
     void setup(ResultHandler resultHandler, Consumer<Throwable> errorHandler) {
         ListenableFuture<Void> future = executor.submit(() -> {
             try {
-                log.info("Starting RPCService with btcd-cli4j version {} on {}:{} with user {}, " +
-                                "listening for blocknotify on port {} from {}",
-                        BtcdCli4jVersion.VERSION, this.rpcHost, this.rpcPort, this.rpcUser, this.rpcBlockPort,
-                        this.rpcBlockHost);
+                log.info("Starting RPCService with btcd-cli4j version {} on {}:{} with user {}, " + "listening for blocknotify on port {} from {}", BtcdCli4jVersion.VERSION, this.rpcHost, this.rpcPort, this.rpcUser, this.rpcBlockPort, this.rpcBlockHost);
 
                 long startTs = System.currentTimeMillis();
                 PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager();
@@ -145,7 +139,13 @@ public class RpcService {
                 nodeConfig.setProperty("node.bitcoind.notification.wallet.port", String.valueOf(bisq.network.p2p.Utils.findFreeSystemPort()));
 
                 nodeConfig.setProperty("node.bitcoind.http.auth_scheme", "Basic");
-                BtcdClientImpl client = new BtcdClientImpl(httpProvider, nodeConfig);
+                log.info("Done setting btcd config");
+                BtcdClientImpl client = null;
+                try {
+                    client = new BtcdClientImpl(httpProvider, nodeConfig);
+                } catch (Throwable e) {
+                    log.error("Error in btcdclient:", e);
+                }
                 daemon = new BtcdDaemonImpl(client, throwable -> {
                     log.error(throwable.toString());
                     throwable.printStackTrace();
@@ -179,8 +179,7 @@ public class RpcService {
         });
     }
 
-    void addNewBtcBlockHandler(Consumer<RawBlock> btcBlockHandler,
-                               Consumer<Throwable> errorHandler) {
+    void addNewBtcBlockHandler(Consumer<RawBlock> btcBlockHandler, Consumer<Throwable> errorHandler) {
         daemon.addBlockListener(new BlockListener() {
             @Override
             public void blockDetected(com.neemre.btcdcli4j.core.domain.RawBlock rawBtcBlock) {
@@ -191,15 +190,10 @@ public class RpcService {
 
                 try {
                     log.info("New block received: height={}, id={}", rawBtcBlock.getHeight(), rawBtcBlock.getHash());
-                    List<RawTx> txList = rawBtcBlock.getTx().stream()
-                            .map(e -> getTxFromRawTransaction(e, rawBtcBlock))
-                            .collect(Collectors.toList());
+                    List<RawTx> txList = rawBtcBlock.getTx().stream().map(e -> getTxFromRawTransaction(e, rawBtcBlock)).collect(Collectors.toList());
                     UserThread.execute(() -> {
-                        btcBlockHandler.accept(new RawBlock(rawBtcBlock.getHeight(),
-                                rawBtcBlock.getTime() * 1000, // rawBtcBlock.getTime() is in sec but we want ms
-                                rawBtcBlock.getHash(),
-                                rawBtcBlock.getPreviousBlockHash(),
-                                ImmutableList.copyOf(txList)));
+                        btcBlockHandler.accept(new RawBlock(rawBtcBlock.getHeight(), rawBtcBlock.getTime() * 1000, // rawBtcBlock.getTime() is in sec but we want ms
+                                rawBtcBlock.getHash(), rawBtcBlock.getPreviousBlockHash(), ImmutableList.copyOf(txList)));
                     });
                 } catch (Throwable t) {
                     errorHandler.accept(t);
@@ -221,23 +215,15 @@ public class RpcService {
         });
     }
 
-    void requestBtcBlock(int blockHeight,
-                         Consumer<RawBlock> resultHandler,
-                         Consumer<Throwable> errorHandler) {
+    void requestBtcBlock(int blockHeight, Consumer<RawBlock> resultHandler, Consumer<Throwable> errorHandler) {
         ListenableFuture<RawBlock> future = executor.submit(() -> {
             long startTs = System.currentTimeMillis();
             String blockHash = client.getBlockHash(blockHeight);
             com.neemre.btcdcli4j.core.domain.RawBlock rawBtcBlock = client.getBlock(blockHash, 2);
-            List<RawTx> txList = rawBtcBlock.getTx().stream()
-                    .map(e -> getTxFromRawTransaction(e, rawBtcBlock))
-                    .collect(Collectors.toList());
-            log.info("requestBtcBlock from bitcoind at blockHeight {} with {} txs took {} ms",
-                    blockHeight, txList.size(), System.currentTimeMillis() - startTs);
-            return new RawBlock(rawBtcBlock.getHeight(),
-                    rawBtcBlock.getTime() * 1000, // rawBtcBlock.getTime() is in sec but we want ms
-                    rawBtcBlock.getHash(),
-                    rawBtcBlock.getPreviousBlockHash(),
-                    ImmutableList.copyOf(txList));
+            List<RawTx> txList = rawBtcBlock.getTx().stream().map(e -> getTxFromRawTransaction(e, rawBtcBlock)).collect(Collectors.toList());
+            log.info("requestBtcBlock from bitcoind at blockHeight {} with {} txs took {} ms", blockHeight, txList.size(), System.currentTimeMillis() - startTs);
+            return new RawBlock(rawBtcBlock.getHeight(), rawBtcBlock.getTime() * 1000, // rawBtcBlock.getTime() is in sec but we want ms
+                    rawBtcBlock.getHash(), rawBtcBlock.getPreviousBlockHash(), ImmutableList.copyOf(txList));
         });
 
         Futures.addCallback(future, new FutureCallback<>() {
@@ -265,70 +251,42 @@ public class RpcService {
         long blockTime = rawBtcBlock.getTime() * 1000; // We convert block time from sec to ms
         int blockHeight = rawBtcBlock.getHeight();
         String blockHash = rawBtcBlock.getHash();
-        final List<TxInput> txInputs = rawBtcTx.getVIn()
-                .stream()
-                .filter(rawInput -> rawInput != null && rawInput.getVOut() != null && rawInput.getTxId() != null)
-                .map(rawInput -> {
-                    // We don't support segWit inputs yet as well as no pay to pubkey txs...
-                    String[] split = rawInput.getScriptSig().getAsm().split("\\[ALL] ");
-                    String pubKeyAsHex;
-                    if (split.length == 2) {
-                        pubKeyAsHex = rawInput.getScriptSig().getAsm().split("\\[ALL] ")[1];
-                    } else {
-                        // If we receive a pay to pubkey tx the pubKey is not included as
-                        // it is in the output already.
-                        // Bitcoin Core creates payToPubKey tx when spending mined coins (regtest)...
-                        pubKeyAsHex = null;
-                        log.debug("pubKeyAsHex is not set as we received a not supported sigScript " +
-                                        "(segWit or payToPubKey tx). txId={}, asm={}",
-                                rawBtcTx.getTxId(), rawInput.getScriptSig().getAsm());
+        final List<TxInput> txInputs = rawBtcTx.getVIn().stream().filter(rawInput -> rawInput != null && rawInput.getVOut() != null && rawInput.getTxId() != null).map(rawInput -> {
+            // We don't support segWit inputs yet as well as no pay to pubkey txs...
+            String[] split = rawInput.getScriptSig().getAsm().split("\\[ALL] ");
+            String pubKeyAsHex;
+            if (split.length == 2) {
+                pubKeyAsHex = rawInput.getScriptSig().getAsm().split("\\[ALL] ")[1];
+            } else {
+                // If we receive a pay to pubkey tx the pubKey is not included as
+                // it is in the output already.
+                // Bitcoin Core creates payToPubKey tx when spending mined coins (regtest)...
+                pubKeyAsHex = null;
+                log.debug("pubKeyAsHex is not set as we received a not supported sigScript " + "(segWit or payToPubKey tx). txId={}, asm={}", rawBtcTx.getTxId(), rawInput.getScriptSig().getAsm());
+            }
+            return new TxInput(rawInput.getTxId(), rawInput.getVOut(), pubKeyAsHex);
+        }).collect(Collectors.toList());
+
+        final List<RawTxOutput> txOutputs = rawBtcTx.getVOut().stream().filter(e -> e != null && e.getN() != null && e.getValue() != null && e.getScriptPubKey() != null).map(rawBtcTxOutput -> {
+            byte[] opReturnData = null;
+            com.neemre.btcdcli4j.core.domain.PubKeyScript scriptPubKey = rawBtcTxOutput.getScriptPubKey();
+            if (ScriptTypes.NULL_DATA.equals(scriptPubKey.getType()) && scriptPubKey.getAsm() != null) {
+                String[] chunks = scriptPubKey.getAsm().split(" ");
+                // We get on testnet a lot of "OP_RETURN 0" data, so we filter those away
+                if (chunks.length == 2 && "OP_RETURN".equals(chunks[0]) && !"0".equals(chunks[1])) {
+                    try {
+                        opReturnData = Utils.HEX.decode(chunks[1]);
+                    } catch (Throwable t) {
+                        log.debug("Error at Utils.HEX.decode(chunks[1]): " + t.toString() + " / chunks[1]=" + chunks[1] + "\nWe get sometimes exceptions with opReturn data, seems BitcoinJ " + "cannot handle all " + "existing OP_RETURN data, but we ignore them anyway as the OP_RETURN " + "data used for DAO transactions are all valid in BitcoinJ");
                     }
-                    return new TxInput(rawInput.getTxId(), rawInput.getVOut(), pubKeyAsHex);
-                })
-                .collect(Collectors.toList());
+                }
+            }
+            // We don't support raw MS which are the only case where scriptPubKey.getAddresses()>1
+            String address = scriptPubKey.getAddresses() != null && scriptPubKey.getAddresses().size() == 1 ? scriptPubKey.getAddresses().get(0) : null;
+            PubKeyScript pubKeyScript = new PubKeyScript(scriptPubKey);
+            return new RawTxOutput(rawBtcTxOutput.getN(), rawBtcTxOutput.getValue().movePointRight(8).longValue(), rawBtcTx.getTxId(), pubKeyScript, address, opReturnData, blockHeight);
+        }).collect(Collectors.toList());
 
-        final List<RawTxOutput> txOutputs = rawBtcTx.getVOut()
-                .stream()
-                .filter(e -> e != null && e.getN() != null && e.getValue() != null && e.getScriptPubKey() != null)
-                .map(rawBtcTxOutput -> {
-                            byte[] opReturnData = null;
-                            com.neemre.btcdcli4j.core.domain.PubKeyScript scriptPubKey = rawBtcTxOutput.getScriptPubKey();
-                            if (ScriptTypes.NULL_DATA.equals(scriptPubKey.getType()) && scriptPubKey.getAsm() != null) {
-                                String[] chunks = scriptPubKey.getAsm().split(" ");
-                                // We get on testnet a lot of "OP_RETURN 0" data, so we filter those away
-                                if (chunks.length == 2 && "OP_RETURN".equals(chunks[0]) && !"0".equals(chunks[1])) {
-                                    try {
-                                        opReturnData = Utils.HEX.decode(chunks[1]);
-                                    } catch (Throwable t) {
-                                        log.debug("Error at Utils.HEX.decode(chunks[1]): " + t.toString() +
-                                                " / chunks[1]=" + chunks[1] +
-                                                "\nWe get sometimes exceptions with opReturn data, seems BitcoinJ " +
-                                                "cannot handle all " +
-                                                "existing OP_RETURN data, but we ignore them anyway as the OP_RETURN " +
-                                                "data used for DAO transactions are all valid in BitcoinJ");
-                                    }
-                                }
-                            }
-                            // We don't support raw MS which are the only case where scriptPubKey.getAddresses()>1
-                            String address = scriptPubKey.getAddresses() != null &&
-                                    scriptPubKey.getAddresses().size() == 1 ? scriptPubKey.getAddresses().get(0) : null;
-                            PubKeyScript pubKeyScript = new PubKeyScript(scriptPubKey);
-                            return new RawTxOutput(rawBtcTxOutput.getN(),
-                                    rawBtcTxOutput.getValue().movePointRight(8).longValue(),
-                                    rawBtcTx.getTxId(),
-                                    pubKeyScript,
-                                    address,
-                                    opReturnData,
-                                    blockHeight);
-                        }
-                )
-                .collect(Collectors.toList());
-
-        return new RawTx(txId,
-                blockHeight,
-                blockHash,
-                blockTime,
-                ImmutableList.copyOf(txInputs),
-                ImmutableList.copyOf(txOutputs));
+        return new RawTx(txId, blockHeight, blockHash, blockTime, ImmutableList.copyOf(txInputs), ImmutableList.copyOf(txOutputs));
     }
 }

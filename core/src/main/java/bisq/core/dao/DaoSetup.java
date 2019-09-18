@@ -79,7 +79,6 @@ public class DaoSetup {
                     ProposalStateMonitoringService proposalStateMonitoringService,
                     BlindVoteStateMonitoringService blindVoteStateMonitoringService,
                     DaoEventCoordinator daoEventCoordinator) {
-
         bsqNode = bsqNodeProvider.getBsqNode();
 
         // We need to take care of order of execution.
