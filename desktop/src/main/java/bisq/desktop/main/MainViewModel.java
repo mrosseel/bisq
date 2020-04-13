@@ -133,7 +133,7 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
     private Timer checkNumberOfP2pNetworkPeersTimer;
     @SuppressWarnings("FieldCanBeLocal")
     private MonadicBinding<Boolean> tradesAndUIReady;
-    private Queue<Overlay> popupQueue = new PriorityQueue<>(Comparator.comparing(Overlay::getDisplayOrderPriority));
+    private Queue<Overlay<?>> popupQueue = new PriorityQueue<>(Comparator.comparing(Overlay::getDisplayOrderPriority));
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -305,16 +305,6 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
             else
                 torNetworkSettingsWindow.hide();
         });
-        bisqSetup.setDisplayLocalNodeMisconfigurationHandler(
-                (Runnable continueWithoutLocalNode) ->
-                        new Popup()
-                                .hideCloseButton()
-                                .warning(Res.get("popup.warning.localNodeMisconfigured.explanation"))
-                                .useShutDownButton()
-                                .secondaryActionButtonText(Res.get("popup.warning.localNodeMisconfigured.continueWithoutLocalNode"))
-                                .onSecondaryAction(continueWithoutLocalNode)
-                                .show()
-        );
         bisqSetup.setSpvFileCorruptedHandler(msg -> new Popup().warning(msg)
                 .actionButtonText(Res.get("settings.net.reSyncSPVChainButton"))
                 .onAction(() -> GUIUtil.reSyncSPVChain(preferences))
@@ -362,7 +352,7 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
                         .show());
         bisqSetup.setDisplayLocalhostHandler(key -> {
             if (!DevEnv.isDevMode()) {
-                Overlay popup = new Popup().backgroundInfo(Res.get("popup.bitcoinLocalhostNode.msg") +
+                Popup popup = new Popup().backgroundInfo(Res.get("popup.bitcoinLocalhostNode.msg") +
                         Res.get("popup.bitcoinLocalhostNode.additionalRequirements"))
                         .dontShowAgainId(key);
                 popup.setDisplayOrderPriority(5);
@@ -396,14 +386,14 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
         tradeManager.getTradesWithoutDepositTx().addListener((ListChangeListener<Trade>) c -> {
             c.next();
             if (c.wasAdded()) {
-                c.getAddedSubList().forEach(trade -> {
-                    new Popup().warning(Res.get("popup.warning.trade.depositTxNull", trade.getShortId()))
-                            .actionButtonText(Res.get("popup.warning.trade.depositTxNull.shutDown"))
-                            .onAction(() -> BisqApp.getShutDownHandler().run())
-                            .secondaryActionButtonText(Res.get("popup.warning.trade.depositTxNull.moveToFailedTrades"))
-                            .onSecondaryAction(() -> tradeManager.addTradeToFailedTrades(trade))
-                            .show();
-                });
+                c.getAddedSubList().forEach(trade ->
+                        new Popup().warning(Res.get("popup.warning.trade.depositTxNull", trade.getShortId()))
+                                .actionButtonText(Res.get("popup.warning.trade.depositTxNull.shutDown"))
+                                .onAction(() -> BisqApp.getShutDownHandler().run())
+                                .secondaryActionButtonText(Res.get("popup.warning.trade.depositTxNull.moveToFailedTrades"))
+                                .onSecondaryAction(() -> tradeManager.addTradeToFailedTrades(trade))
+                                .show()
+                );
             }
         });
 
@@ -682,7 +672,7 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
 
     private void maybeShowPopupsFromQueue() {
         if (!popupQueue.isEmpty()) {
-            Overlay overlay = popupQueue.poll();
+            Overlay<?> overlay = popupQueue.poll();
             overlay.getIsHiddenProperty().addListener((observable, oldValue, newValue) -> {
                 if (newValue) {
                     UserThread.runAfter(this::maybeShowPopupsFromQueue, 2);
