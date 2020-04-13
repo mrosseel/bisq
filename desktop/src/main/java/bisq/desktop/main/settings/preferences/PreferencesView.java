@@ -28,11 +28,10 @@ import bisq.desktop.main.overlays.popups.Popup;
 import bisq.desktop.util.GUIUtil;
 import bisq.desktop.util.ImageUtil;
 import bisq.desktop.util.Layout;
+import bisq.desktop.util.validation.RegexValidator;
 
-import bisq.core.app.BisqEnvironment;
 import bisq.core.btc.wallet.Restrictions;
 import bisq.core.dao.DaoFacade;
-import bisq.core.dao.DaoOptionKeys;
 import bisq.core.dao.governance.asset.AssetService;
 import bisq.core.filter.FilterManager;
 import bisq.core.locale.Country;
@@ -48,11 +47,11 @@ import bisq.core.user.BlockChainExplorer;
 import bisq.core.user.Preferences;
 import bisq.core.util.FormattingUtils;
 import bisq.core.util.ParsingUtils;
-import bisq.core.util.coin.CoinFormatter;
 import bisq.core.util.validation.IntegerValidator;
 
 import bisq.common.UserThread;
 import bisq.common.app.DevEnv;
+import bisq.common.config.Config;
 import bisq.common.util.Tuple3;
 import bisq.common.util.Utilities;
 
@@ -102,6 +101,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
     // not supported yet
     //private ComboBox<String> btcDenominationComboBox;
     private ComboBox<BlockChainExplorer> blockChainExplorerComboBox;
+    private ComboBox<BlockChainExplorer> bsqBlockChainExplorerComboBox;
     private ComboBox<String> userLanguageComboBox;
     private ComboBox<Country> userCountryComboBox;
     private ComboBox<TradeCurrency> preferredTradeCurrencyComboBox;
@@ -123,7 +123,6 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
     private final AssetService assetService;
     private final FilterManager filterManager;
     private final DaoFacade daoFacade;
-    private final CoinFormatter formatter;
 
     private ListView<FiatCurrency> fiatCurrenciesListView;
     private ComboBox<FiatCurrency> fiatCurrenciesComboBox;
@@ -132,6 +131,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
     private Button resetDontShowAgainButton, resyncDaoButton;
     // private ListChangeListener<TradeCurrency> displayCurrenciesListChangeListener;
     private ObservableList<BlockChainExplorer> blockExplorers;
+    private ObservableList<BlockChainExplorer> bsqBlockChainExplorers;
     private ObservableList<String> languageCodes;
     private ObservableList<Country> countries;
     private ObservableList<FiatCurrency> fiatCurrencies;
@@ -159,28 +159,27 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
                            AssetService assetService,
                            FilterManager filterManager,
                            DaoFacade daoFacade,
-                           @Named(FormattingUtils.BTC_FORMATTER_KEY) CoinFormatter formatter,
-                           @Named(DaoOptionKeys.FULL_DAO_NODE) String fullDaoNode,
-                           @Named(DaoOptionKeys.RPC_USER) String rpcUser,
-                           @Named(DaoOptionKeys.RPC_PASSWORD) String rpcPassword,
-                           @Named(DaoOptionKeys.RPC_BLOCK_NOTIFICATION_PORT) String rpcBlockNotificationPort) {
+                           Config config,
+                           @Named(Config.RPC_USER) String rpcUser,
+                           @Named(Config.RPC_PASSWORD) String rpcPassword,
+                           @Named(Config.RPC_BLOCK_NOTIFICATION_PORT) int rpcBlockNotificationPort) {
         super(model);
         this.preferences = preferences;
         this.feeService = feeService;
         this.assetService = assetService;
         this.filterManager = filterManager;
         this.daoFacade = daoFacade;
-        this.formatter = formatter;
-        daoOptionsSet = fullDaoNode != null && !fullDaoNode.isEmpty() &&
-                rpcUser != null && !rpcUser.isEmpty() &&
-                rpcPassword != null && !rpcPassword.isEmpty() &&
-                rpcBlockNotificationPort != null && !rpcBlockNotificationPort.isEmpty();
-        this.displayStandbyModeFeature = Utilities.isOSX() || Utilities.isWindows();
+        daoOptionsSet = config.fullDaoNodeOptionSetExplicitly &&
+                !rpcUser.isEmpty() &&
+                !rpcPassword.isEmpty() &&
+                rpcBlockNotificationPort != Config.UNSPECIFIED_PORT;
+        this.displayStandbyModeFeature = Utilities.isLinux() || Utilities.isOSX() || Utilities.isWindows();
     }
 
     @Override
     public void initialize() {
         blockExplorers = FXCollections.observableArrayList(preferences.getBlockChainExplorers());
+        bsqBlockChainExplorers = FXCollections.observableArrayList(preferences.getBsqBlockChainExplorers());
         languageCodes = FXCollections.observableArrayList(LanguageUtil.getUserLanguageCodes());
         countries = FXCollections.observableArrayList(CountryUtil.getAllCountries());
         fiatCurrencies = preferences.getFiatCurrenciesAsObservable();
@@ -237,10 +236,16 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
                 Res.get("shared.country"));
         userCountryComboBox.setButtonCell(GUIUtil.getComboBoxButtonCell(Res.get("shared.country"), userCountryComboBox,
                 false));
+
         blockChainExplorerComboBox = addComboBox(root, ++gridRow,
                 Res.get("setting.preferences.explorer"));
         blockChainExplorerComboBox.setButtonCell(GUIUtil.getComboBoxButtonCell(Res.get("setting.preferences.explorer"),
                 blockChainExplorerComboBox, false));
+
+        bsqBlockChainExplorerComboBox = addComboBox(root, ++gridRow,
+                Res.get("setting.preferences.explorer.bsq"));
+        bsqBlockChainExplorerComboBox.setButtonCell(GUIUtil.getComboBoxButtonCell(Res.get("setting.preferences.explorer.bsq"),
+                bsqBlockChainExplorerComboBox, false));
 
         Tuple3<Label, InputTextField, ToggleButton> tuple = addTopLabelInputTextFieldSlideToggleButton(root, ++gridRow,
                 Res.get("setting.preferences.txFee"), Res.get("setting.preferences.useCustomValue"));
@@ -267,7 +272,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
                 String estimatedFee = String.valueOf(feeService.getTxFeePerByte().value);
                 try {
                     int withdrawalTxFeePerByte = Integer.parseInt(transactionFeeInputTextField.getText());
-                    final long minFeePerByte = BisqEnvironment.getBaseCurrencyNetwork().getDefaultMinFeePerByte();
+                    final long minFeePerByte = Config.baseCurrencyNetwork().getDefaultMinFeePerByte();
                     if (withdrawalTxFeePerByte < minFeePerByte) {
                         new Popup().warning(Res.get("setting.preferences.txFeeMin", minFeePerByte)).show();
                         transactionFeeInputTextField.setText(estimatedFee);
@@ -319,8 +324,14 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
         // ignoreTraders
         ignoreTradersListInputTextField = addInputTextField(root, ++gridRow,
                 Res.get("setting.preferences.ignorePeers"));
-        ignoreTradersListListener = (observable, oldValue, newValue) ->
+        RegexValidator regexValidator = GUIUtil.addressRegexValidator();
+        ignoreTradersListInputTextField.setValidator(regexValidator);
+        ignoreTradersListInputTextField.setErrorMessage(Res.get("validation.invalidAddressList"));
+        ignoreTradersListListener = (observable, oldValue, newValue) -> {
+            if (regexValidator.validate(newValue).isValid && !newValue.equals(oldValue)) {
                 preferences.setIgnoreTradersList(Arrays.asList(StringUtils.deleteWhitespace(newValue).split(",")));
+            }
+        };
 
         // referralId
        /* referralIdInputTextField = addInputTextField(root, ++gridRow, Res.get("setting.preferences.refererId"));
@@ -638,7 +649,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
                 .collect(Collectors.toList());
         selectBaseCurrencyNetworkComboBox.setItems(FXCollections.observableArrayList(baseCurrencyNetworks));
         selectBaseCurrencyNetworkComboBox.setOnAction(e -> onSelectNetwork());
-        selectBaseCurrencyNetworkComboBox.getSelectionModel().select(BisqEnvironment.getBaseCurrencyNetwork());*/
+        selectBaseCurrencyNetworkComboBox.getSelectionModel().select(BaseCurrencyNetwork.CURRENT_VALUE);*/
 
         boolean useCustomWithdrawalTxFee = preferences.isUseCustomWithdrawalTxFee();
         useCustomFee.setSelected(useCustomWithdrawalTxFee);
@@ -731,6 +742,21 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
             }
         });
         blockChainExplorerComboBox.setOnAction(e -> preferences.setBlockChainExplorer(blockChainExplorerComboBox.getSelectionModel().getSelectedItem()));
+
+        bsqBlockChainExplorerComboBox.setItems(bsqBlockChainExplorers);
+        bsqBlockChainExplorerComboBox.getSelectionModel().select(preferences.getBsqBlockChainExplorer());
+        bsqBlockChainExplorerComboBox.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(BlockChainExplorer bsqBlockChainExplorer) {
+                return bsqBlockChainExplorer.name;
+            }
+
+            @Override
+            public BlockChainExplorer fromString(String string) {
+                return null;
+            }
+        });
+        bsqBlockChainExplorerComboBox.setOnAction(e -> preferences.setBsqBlockChainExplorer(bsqBlockChainExplorerComboBox.getSelectionModel().getSelectedItem()));
 
         deviationInputTextField.setText(FormattingUtils.formatPercentagePrice(preferences.getMaxPriceDistanceInPercent()));
         deviationInputTextField.textProperty().addListener(deviationListener);
@@ -893,7 +919,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
     }
 
    /* private void onSelectNetwork() {
-        if (selectBaseCurrencyNetworkComboBox.getSelectionModel().getSelectedItem() != BisqEnvironment.getBaseCurrencyNetwork())
+        if (selectBaseCurrencyNetworkComboBox.getSelectionModel().getSelectedItem() != BaseCurrencyNetwork.CURRENT_VALUE)
             selectNetwork();
     }
 
@@ -905,7 +931,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
                 })
                 .actionButtonText(Res.get("shared.shutDown"))
                 .closeButtonText(Res.get("shared.cancel"))
-                .onClose(() -> selectBaseCurrencyNetworkComboBox.getSelectionModel().select(BisqEnvironment.getBaseCurrencyNetwork()))
+                .onClose(() -> selectBaseCurrencyNetworkComboBox.getSelectionModel().select(BaseCurrencyNetwork.CURRENT_VALUE))
                 .show();
     }*/
 
@@ -918,6 +944,7 @@ public class PreferencesView extends ActivatableViewAndModel<GridPane, Preferenc
         userLanguageComboBox.setOnAction(null);
         userCountryComboBox.setOnAction(null);
         blockChainExplorerComboBox.setOnAction(null);
+        bsqBlockChainExplorerComboBox.setOnAction(null);
         deviationInputTextField.textProperty().removeListener(deviationListener);
         deviationInputTextField.focusedProperty().removeListener(deviationFocusedListener);
         transactionFeeInputTextField.focusedProperty().removeListener(transactionFeeFocusedListener);

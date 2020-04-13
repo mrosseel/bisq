@@ -28,54 +28,58 @@ To run a pricenode, you will need:
   - JDK 8 if you want to build and run a node locally.
   - The `tor` binary (e.g. `brew install tor`) if you want to run a hidden service locally.
 
+## How to deploy for production
 
-## How to deploy locally
+### Install
 
-### Configure
+Run the one-command installer:
 
-Export the following properties as environment variables, e.g.:
+```bash
+curl -s https://raw.githubusercontent.com/bisq-network/bisq/master/pricenode/install_pricenode_debian.sh | sudo bash
+```
 
-    $ export BITCOIN_AVG_PUBKEY=[your pubkey]
-    $ export BITCOIN_AVG_PRIVKEY=[your privkey]
+At the end of the installer script, it should print your Tor onion hostname.
 
-Or add them to your `bisq.properties` config file, e.g.:
+### Setting your BitcoinAverage API keys
 
-    $ echo BITCOIN_AVG_PUBKEY=[your pubkey] >> $HOME/.config/bisq.properties
-    $ echo BITCOIN_AVG_PRIVKEY=[your privkey] >> $HOME/.config/bisq.properties
+Open `/etc/default/bisq-pricenode.env` in a text editor and look for these lines:
+```bash
+BITCOIN_AVG_PUBKEY=foo
+BITCOIN_AVG_PRIVKEY=bar
+```
 
-> TIP: Using the `bisq.properties` config file has the advantage of not needing to specify environment variables in your IDE. Running the app and running tests will "just work" regardless where and how you run them.
+Add your pubkey and privkey and then reload/restart bisq-pricenode service:
 
-### Build
-
-    ./gradlew assemble
-
-### Run
-
-    java -jar ./build/libs/bisq-pricenode.jar [max-blocks] [request-interval-mins]
+```bash
+systemctl daemon-reload
+systemctl restart bisq-pricenode
+```
 
 ### Test
 
 To manually test endpoints, run each of the following:
 
-    curl http://localhost:8080/getAllMarketPrices
-    curl http://localhost:8080/getFees
-    curl http://localhost:8080/getParams
-    curl http://localhost:8080/getVersion
-    curl http://localhost:8080/info
+``` bash
+curl http://localhost:8080/getAllMarketPrices
+curl http://localhost:8080/getFees
+curl http://localhost:8080/getParams
+curl http://localhost:8080/getVersion
+curl http://localhost:8080/info
+```
 
-### Run as Tor hidden service
+### Monitoring
 
-With your pricenode running at localhost:8080, run:
+If you run a main pricenode, you also are obliged to activate the monitoring feed by running
 
-    tor -f torrc
+```bash
+curl -s https://raw.githubusercontent.com/bisq-network/bisq/master/monitor/install_collectd_debian.sh | sudo bash
+```
+Follow the instruction given by the script and report your certificate to the [@bisq-network/monitoring](https://github.com/orgs/bisq-network/teams/monitoring-operators) team or via the [Keybase](https://keybase.io/team/bisq) `#monitoring` channel!
 
-Wait for the process to report that it is "100% bootstrapped", then copy your newly-generated .onion address:
-
-    export PRICENODE_ONION=$(cat build/tor-hidden-service/hostname)
-
-Test the endpoints of your hidden service via curl with the --socks5-proxy option:
-
-    curl --socks5-hostname 127.0.0.1:9050 http://$PRICENODE_ONION/getAllMarketPrices
+Furthermore, you are obliged to provide network size data to the monitor by running
+```bash
+curl -s https://raw.githubusercontent.com/bisq-network/bisq/master/pricenode/install_networksize_debian.sh | sudo bash
+```
 
 
 ## How to deploy elsewhere

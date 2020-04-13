@@ -21,11 +21,10 @@ import bisq.network.p2p.storage.payload.ExpirablePayload;
 import bisq.network.p2p.storage.payload.ProtectedStoragePayload;
 
 import bisq.common.crypto.Sig;
+import bisq.common.util.CollectionUtils;
 import bisq.common.util.ExtraDataMapValidator;
 
 import com.google.protobuf.ByteString;
-
-import org.springframework.util.CollectionUtils;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -102,6 +101,10 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
     @Nullable
     private final List<String> refundAgents;
 
+    // added in v1.2.x
+    @Nullable
+    private final List<String> bannedSignerPubKeys;
+
     public Filter(List<String> bannedOfferIds,
                   List<String> bannedNodeAddress,
                   List<PaymentAccountFilter> bannedPaymentAccounts,
@@ -116,7 +119,8 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
                   @Nullable String disableDaoBelowVersion,
                   @Nullable String disableTradeBelowVersion,
                   @Nullable List<String> mediators,
-                  @Nullable List<String> refundAgents) {
+                  @Nullable List<String> refundAgents,
+                  @Nullable List<String> bannedSignerPubKeys) {
         this.bannedOfferIds = bannedOfferIds;
         this.bannedNodeAddress = bannedNodeAddress;
         this.bannedPaymentAccounts = bannedPaymentAccounts;
@@ -132,6 +136,7 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
         this.disableTradeBelowVersion = disableTradeBelowVersion;
         this.mediators = mediators;
         this.refundAgents = refundAgents;
+        this.bannedSignerPubKeys = bannedSignerPubKeys;
     }
 
 
@@ -157,7 +162,8 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
                   byte[] ownerPubKeyBytes,
                   @Nullable Map<String, String> extraDataMap,
                   @Nullable List<String> mediators,
-                  @Nullable List<String> refundAgents) {
+                  @Nullable List<String> refundAgents,
+                  @Nullable List<String> bannedSignerPubKeys) {
         this(bannedOfferIds,
                 bannedNodeAddress,
                 bannedPaymentAccounts,
@@ -172,7 +178,8 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
                 disableDaoBelowVersion,
                 disableTradeBelowVersion,
                 mediators,
-                refundAgents);
+                refundAgents,
+                bannedSignerPubKeys);
         this.signatureAsBase64 = signatureAsBase64;
         this.ownerPubKeyBytes = ownerPubKeyBytes;
         this.extraDataMap = ExtraDataMapValidator.getValidatedExtraDataMap(extraDataMap);
@@ -207,6 +214,7 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
         Optional.ofNullable(extraDataMap).ifPresent(builder::putAllExtraData);
         Optional.ofNullable(mediators).ifPresent(builder::addAllMediators);
         Optional.ofNullable(refundAgents).ifPresent(builder::addAllRefundAgents);
+        Optional.ofNullable(bannedSignerPubKeys).ifPresent(builder::addAllBannedSignerPubKeys);
 
         return protobuf.StoragePayload.newBuilder().setFilter(builder).build();
     }
@@ -231,7 +239,9 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
                 proto.getOwnerPubKeyBytes().toByteArray(),
                 CollectionUtils.isEmpty(proto.getExtraDataMap()) ? null : proto.getExtraDataMap(),
                 CollectionUtils.isEmpty(proto.getMediatorsList()) ? null : new ArrayList<>(proto.getMediatorsList()),
-                CollectionUtils.isEmpty(proto.getRefundAgentsList()) ? null : new ArrayList<>(proto.getRefundAgentsList()));
+                CollectionUtils.isEmpty(proto.getRefundAgentsList()) ? null : new ArrayList<>(proto.getRefundAgentsList()),
+                CollectionUtils.isEmpty(proto.getBannedSignerPubKeysList()) ?
+                        null : new ArrayList<>(proto.getBannedSignerPubKeysList()));
     }
 
 
@@ -270,6 +280,7 @@ public final class Filter implements ProtectedStoragePayload, ExpirablePayload {
                 ",\n     disableTradeBelowVersion='" + disableTradeBelowVersion + '\'' +
                 ",\n     mediators=" + mediators +
                 ",\n     refundAgents=" + refundAgents +
+                ",\n     bannedSignerPubKeys=" + bannedSignerPubKeys +
                 "\n}";
     }
 }

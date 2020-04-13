@@ -22,13 +22,13 @@ import bisq.desktop.components.InputTextField;
 import bisq.desktop.main.overlays.Overlay;
 import bisq.desktop.main.overlays.popups.Popup;
 
-import bisq.core.app.AppOptionKeys;
 import bisq.core.filter.Filter;
 import bisq.core.filter.FilterManager;
 import bisq.core.filter.PaymentAccountFilter;
 import bisq.core.locale.Res;
 
 import bisq.common.app.DevEnv;
+import bisq.common.config.Config;
 
 import com.google.inject.Inject;
 
@@ -39,9 +39,11 @@ import org.apache.commons.lang3.StringUtils;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Region;
 
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
@@ -58,13 +60,19 @@ import static bisq.desktop.util.FormBuilder.addTopLabelInputTextField;
 public class FilterWindow extends Overlay<FilterWindow> {
     private final FilterManager filterManager;
     private final boolean useDevPrivilegeKeys;
+    private ScrollPane scrollPane;
 
     @Inject
     public FilterWindow(FilterManager filterManager,
-                        @Named(AppOptionKeys.USE_DEV_PRIVILEGE_KEYS) boolean useDevPrivilegeKeys) {
+                        @Named(Config.USE_DEV_PRIVILEGE_KEYS) boolean useDevPrivilegeKeys) {
         this.filterManager = filterManager;
         this.useDevPrivilegeKeys = useDevPrivilegeKeys;
         type = Type.Attention;
+    }
+
+    @Override
+    protected Region getRootContainer() {
+        return scrollPane;
     }
 
     public void show() {
@@ -72,7 +80,16 @@ public class FilterWindow extends Overlay<FilterWindow> {
             headLine = Res.get("filterWindow.headline");
 
         width = 968;
+
         createGridPane();
+
+        scrollPane = new ScrollPane();
+        scrollPane.setContent(gridPane);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setFitToHeight(true);
+        scrollPane.setMaxHeight(1000);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+
         addHeadLine();
         addContent();
         applyStyles();
@@ -108,6 +125,8 @@ public class FilterWindow extends Overlay<FilterWindow> {
         InputTextField bannedCurrenciesInputTextField = addInputTextField(gridPane, ++rowIndex, Res.get("filterWindow.bannedCurrencies"));
         InputTextField bannedPaymentMethodsInputTextField = addTopLabelInputTextField(gridPane, ++rowIndex, Res.get("filterWindow.bannedPaymentMethods")).second;
         bannedPaymentMethodsInputTextField.setPromptText("E.g. PERFECT_MONEY"); // Do not translate
+        InputTextField bannedSignerPubKeysInputTextField = addTopLabelInputTextField(gridPane, ++rowIndex, Res.get("filterWindow.bannedSignerPubKeys")).second;
+        bannedSignerPubKeysInputTextField.setPromptText("E.g. 7f66117aa084e5a2c54fe17d29dd1fee2b241257"); // Do not translate
         InputTextField arbitratorsInputTextField = addInputTextField(gridPane, ++rowIndex, Res.get("filterWindow.arbitrators"));
         InputTextField mediatorsInputTextField = addInputTextField(gridPane, ++rowIndex, Res.get("filterWindow.mediators"));
         InputTextField refundAgentsInputTextField = addInputTextField(gridPane, ++rowIndex, Res.get("filterWindow.refundAgents"));
@@ -126,12 +145,14 @@ public class FilterWindow extends Overlay<FilterWindow> {
             setupFieldFromPaymentAccountFiltersList(paymentAccountFilterInputTextField, filter.getBannedPaymentAccounts());
             setupFieldFromList(bannedCurrenciesInputTextField, filter.getBannedCurrencies());
             setupFieldFromList(bannedPaymentMethodsInputTextField, filter.getBannedPaymentMethods());
+            setupFieldFromList(bannedSignerPubKeysInputTextField, filter.getBannedSignerPubKeys());
             setupFieldFromList(arbitratorsInputTextField, filter.getArbitrators());
             setupFieldFromList(mediatorsInputTextField, filter.getMediators());
             setupFieldFromList(refundAgentsInputTextField, filter.getRefundAgents());
             setupFieldFromList(seedNodesInputTextField, filter.getSeedNodes());
             setupFieldFromList(priceRelayNodesInputTextField, filter.getPriceRelayNodes());
             setupFieldFromList(btcNodesInputTextField, filter.getBtcNodes());
+
             preventPublicBtcNetworkCheckBox.setSelected(filter.isPreventPublicBtcNetwork());
             disableDaoCheckBox.setSelected(filter.isDisableDao());
             disableDaoBelowVersionInputTextField.setText(filter.getDisableDaoBelowVersion());
@@ -155,7 +176,8 @@ public class FilterWindow extends Overlay<FilterWindow> {
                             disableDaoBelowVersionInputTextField.getText(),
                             disableTradeBelowVersionInputTextField.getText(),
                             readAsList(mediatorsInputTextField),
-                            readAsList(refundAgentsInputTextField)
+                            readAsList(refundAgentsInputTextField),
+                            readAsList(bannedSignerPubKeysInputTextField)
                     ),
                     keyInputTextField.getText())
             )
