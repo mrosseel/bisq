@@ -3,14 +3,17 @@
 FROM gradle:jdk11 as builder
 ARG SEEDNODE_URL
 ARG SEEDNODE_BRANCH
+RUN apt-get install git-lfs -y
 RUN git clone $SEEDNODE_URL
 WORKDIR /home/gradle/bisq/seednode
+RUN git lfs install
 # git sometimes complains about this, can be bogus because we're not going to commit things
 RUN git config --global user.email "you@example.com"
 RUN git config --global user.name "Your Name"
 RUN git fetch origin $SEEDNODE_BRANCH && git checkout $SEEDNODE_BRANCH
 RUN git rev-parse --verify HEAD > git_head.txt
-RUN gradle build
+RUN git lfs pull
+RUN gradle build -x test
 RUN chmod +x ./build/app/bin/bisq-seednode
 
 # then the actual image is created, without gradle, using just the artifacts from the builder
