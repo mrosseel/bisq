@@ -33,6 +33,7 @@ import bisq.core.payment.payload.PaymentMethod;
 import bisq.core.support.dispute.Dispute;
 import bisq.core.support.dispute.DisputeResult;
 import bisq.core.support.dispute.arbitration.TraderDataItem;
+import bisq.core.trade.Contract;
 import bisq.core.trade.Trade;
 import bisq.core.trade.protocol.TradingPeer;
 import bisq.core.user.User;
@@ -54,8 +55,11 @@ import bisq.common.util.Utilities;
 
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.Utils;
 
 import javax.inject.Inject;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import java.security.PublicKey;
 
@@ -73,6 +77,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import lombok.extern.slf4j.Slf4j;
+
+import javax.annotation.Nullable;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -94,15 +100,25 @@ public class AccountAgeWitnessService {
         ARBITRATOR(Res.get("offerbook.timeSinceSigning.info.arbitrator")),
         PEER_INITIAL(Res.get("offerbook.timeSinceSigning.info.peer")),
         PEER_LIMIT_LIFTED(Res.get("offerbook.timeSinceSigning.info.peerLimitLifted")),
-        PEER_SIGNER(Res.get("offerbook.timeSinceSigning.info.signer"));
+        PEER_SIGNER(Res.get("offerbook.timeSinceSigning.info.signer")),
+        BANNED(Res.get("offerbook.timeSinceSigning.info.banned"));
 
         private String presentation;
+        private String hash = "";
 
         SignState(String presentation) {
             this.presentation = presentation;
         }
 
+        public SignState addHash(String hash) {
+            this.hash = hash;
+            return this;
+        }
+
         public String getPresentation() {
+            if (!hash.isEmpty()) { // Only showing in DEBUG mode
+                return presentation + " " + hash;
+            }
             return presentation;
         }
 
@@ -161,16 +177,22 @@ public class AccountAgeWitnessService {
         });
 
         if (p2PService.isBootstrapped()) {
-            republishAllFiatAccounts();
+            onBootStrapped();
         } else {
             p2PService.addP2PServiceListener(new BootstrapListener() {
                 @Override
                 public void onUpdatedDataReceived() {
-                    republishAllFiatAccounts();
+                    onBootStrapped();
                 }
             });
         }
     }
+
+    private void onBootStrapped() {
+        republishAllFiatAccounts();
+        signSameNameAccounts();
+    }
+
 
     // At startup we re-publish the witness data of all fiat accounts to ensure we got our data well distributed.
     private void republishAllFiatAccounts() {
@@ -185,7 +207,8 @@ public class AccountAgeWitnessService {
                     });
     }
 
-    private void addToMap(AccountAgeWitness accountAgeWitness) {
+    @VisibleForTesting
+    public void addToMap(AccountAgeWitness accountAgeWitness) {
         accountAgeWitnessMap.putIfAbsent(accountAgeWitness.getHashAsByteArray(), accountAgeWitness);
     }
 
@@ -200,11 +223,18 @@ public class AccountAgeWitnessService {
             p2PService.addPersistableNetworkPayload(accountAgeWitness, false);
     }
 
+    public byte[] getPeerAccountAgeWitnessHash(Trade trade) {
+        return findTradePeerWitness(trade)
+                .map(accountAgeWitness -> accountAgeWitness.getHash())
+                .orElse(null);
+    }
+
     private byte[] getAccountInputDataWithSalt(PaymentAccountPayload paymentAccountPayload) {
         return Utilities.concatenateByteArrays(paymentAccountPayload.getAgeWitnessInputData(), paymentAccountPayload.getSalt());
     }
 
-    private AccountAgeWitness getNewWitness(PaymentAccountPayload paymentAccountPayload, PubKeyRing pubKeyRing) {
+    @VisibleForTesting
+    public AccountAgeWitness getNewWitness(PaymentAccountPayload paymentAccountPayload, PubKeyRing pubKeyRing) {
         byte[] accountInputDataWithSalt = getAccountInputDataWithSalt(paymentAccountPayload);
         byte[] hash = Hash.getSha256Ripemd160hash(Utilities.concatenateByteArrays(accountInputDataWithSalt,
                 pubKeyRing.getSignaturePubKeyBytes()));
@@ -621,7 +651,8 @@ public class AccountAgeWitnessService {
     }
 
     // Arbitrator signing
-    public List<TraderDataItem> getTraderPaymentAccounts(long safeDate, PaymentMethod paymentMethod,
+    public List<TraderDataItem> getTraderPaymentAccounts(long safeDate,
+                                                         PaymentMethod paymentMethod,
                                                          List<Dispute> disputes) {
         return disputes.stream()
                 .filter(dispute -> dispute.getContract().getPaymentMethodId().equals(paymentMethod.getId()))
@@ -646,11 +677,16 @@ public class AccountAgeWitnessService {
                 filterManager.isPeersPaymentAccountDataAreBanned(dispute.getContract().getBuyerPaymentAccountPayload(),
                         new PaymentAccountFilter[1]) ||
                 filterManager.isPeersPaymentAccountDataAreBanned(dispute.getContract().getSellerPaymentAccountPayload(),
-                        new PaymentAccountFilter[1]);
+                        new PaymentAccountFilter[1]) ||
+                filterManager.isSignerPubKeyBanned(
+                        Utils.HEX.encode(dispute.getContract().getBuyerPubKeyRing().getSignaturePubKeyBytes())) ||
+                filterManager.isSignerPubKeyBanned(
+                        Utils.HEX.encode(dispute.getContract().getSellerPubKeyRing().getSignaturePubKeyBytes()));
         return !isFiltered;
     }
 
-    private boolean hasChargebackRisk(Dispute dispute) {
+    @VisibleForTesting
+    public boolean hasChargebackRisk(Dispute dispute) {
         return chargeBackRisk.hasChargebackRisk(dispute.getContract().getPaymentMethodId(),
                 dispute.getContract().getOfferPayload().getCurrencyCode());
     }
@@ -675,14 +711,14 @@ public class AccountAgeWitnessService {
                         buyerPaymentAccountPaload,
                         witness,
                         tradeAmount,
-                        sellerPubKeyRing.getSignaturePubKey()))
+                        buyerPubKeyRing.getSignaturePubKey()))
                 .orElse(null);
         TraderDataItem sellerData = findWitness(sellerPaymentAccountPaload, sellerPubKeyRing)
                 .map(witness -> new TraderDataItem(
                         sellerPaymentAccountPaload,
                         witness,
                         tradeAmount,
-                        buyerPubKeyRing.getSignaturePubKey()))
+                        sellerPubKeyRing.getSignaturePubKey()))
                 .orElse(null);
         return Stream.of(buyerData, sellerData);
     }
@@ -720,21 +756,110 @@ public class AccountAgeWitnessService {
     }
 
     public SignState getSignState(AccountAgeWitness accountAgeWitness) {
+        // Add hash to sign state info when running in debug mode
+        String hash = log.isDebugEnabled() ? Utilities.bytesAsHexString(accountAgeWitness.getHash()) + "\n" +
+                signedWitnessService.ownerPubKey(accountAgeWitness) : "";
+        if (signedWitnessService.isFilteredWitness(accountAgeWitness)) {
+            return SignState.BANNED.addHash(hash);
+        }
         if (signedWitnessService.isSignedByArbitrator(accountAgeWitness)) {
-            return SignState.ARBITRATOR;
+            return SignState.ARBITRATOR.addHash(hash);
         } else {
             final long accountSignAge = getWitnessSignAge(accountAgeWitness, new Date());
             switch (getAccountAgeCategory(accountSignAge)) {
                 case TWO_MONTHS_OR_MORE:
-                    return SignState.PEER_SIGNER;
                 case ONE_TO_TWO_MONTHS:
-                    return SignState.PEER_LIMIT_LIFTED;
+                    return SignState.PEER_SIGNER.addHash(hash);
                 case LESS_ONE_MONTH:
-                    return SignState.PEER_INITIAL;
+                    return SignState.PEER_INITIAL.addHash(hash);
                 case UNVERIFIED:
                 default:
-                    return SignState.UNSIGNED;
+                    return SignState.UNSIGNED.addHash(hash);
             }
         }
+    }
+
+    public void signSameNameAccounts() {
+        // Collect accounts that have ownerId to sign unsigned accounts with the same ownderId
+        var signerAccounts = Objects.requireNonNull(user.getPaymentAccounts()).stream()
+                .filter(account -> account.getOwnerId() != null &&
+                        accountIsSigner(getMyWitness(account.getPaymentAccountPayload())))
+                .collect(Collectors.toSet());
+        var unsignedAccounts = user.getPaymentAccounts().stream()
+                .filter(account -> account.getOwnerId() != null &&
+                        !signedWitnessService.isSignedAccountAgeWitness(
+                                getMyWitness(account.getPaymentAccountPayload())))
+                .collect(Collectors.toSet());
+
+        signerAccounts.forEach(signer -> unsignedAccounts.forEach(unsigned -> {
+            if (signer.getOwnerId().equals(unsigned.getOwnerId())) {
+                try {
+                    signedWitnessService.selfSignAccountAgeWitness(
+                            getMyWitness(unsigned.getPaymentAccountPayload()));
+                } catch (CryptoException e) {
+                    log.warn("Self signing failed, exception {}", e.toString());
+                }
+            }
+        }));
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    // Debug logs
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    private String getWitnessDebugLog(PaymentAccountPayload paymentAccountPayload,
+                                      PubKeyRing pubKeyRing) {
+        Optional<AccountAgeWitness> accountAgeWitness = findWitness(paymentAccountPayload, pubKeyRing);
+        if (!accountAgeWitness.isPresent()) {
+            byte[] accountInputDataWithSalt = getAccountInputDataWithSalt(paymentAccountPayload);
+            byte[] hash = Hash.getSha256Ripemd160hash(Utilities.concatenateByteArrays(accountInputDataWithSalt,
+                    pubKeyRing.getSignaturePubKeyBytes()));
+            return "No accountAgeWitness found for paymentAccountPayload with hash " + Utilities.bytesAsHexString(hash);
+        }
+
+        SignState signState = getSignState(accountAgeWitness.get());
+        return signState.name() + " " + signState.getPresentation() +
+                "\n" + accountAgeWitness.toString();
+    }
+
+    public void witnessDebugLog(Trade trade, @Nullable AccountAgeWitness myWitness) {
+        // Log to find why accounts sometimes don't get signed as expected
+        // TODO: Demote to debug or remove once account signing is working ok
+        checkNotNull(trade.getContract());
+        checkNotNull(trade.getContract().getBuyerPaymentAccountPayload());
+        boolean checkingSignTrade = true;
+        boolean isBuyer = trade.getContract().isMyRoleBuyer(keyRing.getPubKeyRing());
+        AccountAgeWitness witness = myWitness;
+        if (witness == null) {
+            witness = isBuyer ?
+                    getMyWitness(trade.getContract().getBuyerPaymentAccountPayload()) :
+                    getMyWitness(trade.getContract().getSellerPaymentAccountPayload());
+            checkingSignTrade = false;
+        }
+        boolean isSignWitnessTrade = accountIsSigner(witness) &&
+                !peerHasSignedWitness(trade) &&
+                tradeAmountIsSufficient(trade.getTradeAmount());
+        log.info("AccountSigning: " +
+                        "\ntradeId: {}" +
+                        "\nis buyer: {}" +
+                        "\nbuyer account age witness info: {}" +
+                        "\nseller account age witness info: {}" +
+                        "\nchecking for sign trade: {}" +
+                        "\nis myWitness signer: {}" +
+                        "\npeer has signed witness: {}" +
+                        "\ntrade amount: {}" +
+                        "\ntrade amount is sufficient: {}" +
+                        "\nisSignWitnessTrade: {}",
+                trade.getId(),
+                isBuyer,
+                getWitnessDebugLog(trade.getContract().getBuyerPaymentAccountPayload(),
+                        trade.getContract().getBuyerPubKeyRing()),
+                getWitnessDebugLog(trade.getContract().getSellerPaymentAccountPayload(),
+                        trade.getContract().getSellerPubKeyRing()),
+                checkingSignTrade, // Following cases added to use same logic as in seller signing check
+                accountIsSigner(witness),
+                peerHasSignedWitness(trade),
+                trade.getTradeAmount(),
+                tradeAmountIsSufficient(trade.getTradeAmount()),
+                isSignWitnessTrade);
     }
 }

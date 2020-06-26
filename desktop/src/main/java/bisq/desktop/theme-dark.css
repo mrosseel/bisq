@@ -107,11 +107,11 @@
 
     -bs-toggle-selected: #25b135;
     -bs-warning: #db6300;
-    -bs-buy: #2ea33c;
+    -bs-buy: #006600;
     -bs-buy-focus: black;
     -bs-buy-hover: #237b2d;
     -bs-buy-transparent: rgba(46, 163, 60, 0.3);
-    -bs-sell: #ee6563;
+    -bs-sell: #660000;
     -bs-sell-focus: #090202;
     -bs-sell-hover: #b42522;
     -bs-sell-transparent: rgba(216, 52, 49, 0.3);
@@ -122,60 +122,19 @@
     -bs-cancel: #1d1d21;
     -bs-cancel-focus: black;
     -bs-cancel-hover: #050506;
-
     -bs-green-soft: derive(-bs-rd-green, 60%);
     -bs-red-soft: derive(-bs-rd-error-red, 60%);
+    -bs-progress-bar-track: #272728;
+    -bs-chart-tick: rgba(255, 255, 255, 0.7);
+    -bs-chart-lines: rgba(0, 0, 0, 0.3);
+    -bs-white: white;
+    -bs-prompt-text: -bs-color-gray-3;
+
+    /* dao chart colors */
+    -bs-chart-dao-line1: -bs-color-green-5;
+    -bs-chart-dao-line2: -bs-color-blue-2;
 }
 
-/* list view */
-.list-view .list-cell {
-    -fx-background-color: -bs-background-color;
-}
-.list-view .list-cell:odd {
-    -fx-background-color: derive(-bs-background-color, -5%);
-}
-.list-view .list-cell:even {
-    -fx-background-color: derive(-bs-background-color, 5%);
-}
-.list-view .list-cell:selected,
-.table-view .table-cell:selected {
-    -fx-background: -fx-accent;
-    -fx-background-color: -fx-selection-bar;
-    -fx-border-color: -fx-selection-bar;
-}
-
-.number-column.table-cell {
-    -fx-background-color: -bs-background-color;
-}
-
-/* table view */
-.table-view, .table-cell:focused, .table-row-cell {
-    -fx-background: transparent;
-}
-.table-view .table-row-cell:even .table-cell {
-    -fx-background-color: derive(-bs-background-color, 5%);
-    -fx-border-color: derive(-bs-background-color,5%);
-}
-.table-view .table-row-cell:odd .table-cell {
-    -fx-background-color: derive(-bs-background-color,-5%);
-    -fx-border-color: derive(-bs-background-color,-5%);
-}
-.table-view .table-row-cell:selected .table-cell {
-    -fx-background: -fx-accent;
-    -fx-background-color: -fx-selection-bar;
-    -fx-border-color: -fx-selection-bar;
-}
-.table-row-cell {
-    -fx-border-color: -bs-background-color;
-}
-.table-row-cell:empty, .table-row-cell:empty:even, .table-row-cell:empty:odd {
-    -fx-background-color: -bs-background-color;
-    -fx-min-height: 36;
-}
-.offer-table .table-row-cell {
-    -fx-background: -fx-accent;
-    -fx-background-color: -bs-color-gray-6;
-}
 
 /* tab pane */
 .jfx-tab-pane .tab-content-area {
@@ -209,13 +168,6 @@
     -fx-border-color: -bs-color-gray-2;
 }
 
-#sell-button, #sell-button-big {
-    -fx-background-color: #660000 !important;
-}
-#buy-button, #buy-button-big {
-    -fx-background-color: #006600 !important;
-}
-
 .wallet-seed-words {
     -fx-text-fill: -bs-color-gray-6;
 }
@@ -234,12 +186,12 @@
     -fx-border-color: transparent transparent transparent transparent;
 }
 #charts .axis, #price-chart .axis, #volume-chart .axis, #charts-dao .axis {
-    -fx-tick-label-fill: rgba(255,255,255,0.7);
+    -fx-tick-label-fill: -bs-chart-tick;
 }
 .chart-horizontal-grid-lines,
 .chart-horizontal-zero-line, .chart-vertical-zero-line,
 .axis-tick-mark, .axis-minor-tick-mark {
-    -fx-stroke: rgba(0,0,0,0.3);
+    -fx-stroke: -bs-chart-lines;
 }
 
 /* scrollbars */
@@ -253,11 +205,17 @@
 .scroll-bar:vertical .thumb:hover {
     -fx-background-color: -bs-color-gray-5;
 }
+
 .scroll-bar:horizontal .thumb:pressed,
 .scroll-bar:vertical .thumb:pressed {
     -fx-background-color: -bs-color-gray-4;
 }
+
 .scroll-bar:vertical:focused,
 .scroll-bar:horizontal:focused {
     -fx-background-color: transparent, -bs-color-gray-4, -bs-color-gray-4;
+}
+
+.small-icon-label {
+    -fx-fill: -bs-text-color;
 }

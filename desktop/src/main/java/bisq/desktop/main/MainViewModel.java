@@ -40,9 +40,8 @@ import bisq.desktop.util.GUIUtil;
 import bisq.core.account.sign.SignedWitnessService;
 import bisq.core.account.witness.AccountAgeWitnessService;
 import bisq.core.alert.PrivateNotificationManager;
-import bisq.core.app.AppOptionKeys;
-import bisq.core.app.BisqEnvironment;
 import bisq.core.app.BisqSetup;
+import bisq.core.btc.nodes.LocalBitcoinNode;
 import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.locale.CryptoCurrency;
@@ -67,6 +66,7 @@ import bisq.network.p2p.P2PService;
 import bisq.common.Timer;
 import bisq.common.UserThread;
 import bisq.common.app.DevEnv;
+import bisq.common.config.Config;
 import bisq.common.storage.CorruptedDatabaseFilesHandler;
 
 import com.google.inject.Inject;
@@ -118,7 +118,8 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
     private final TacWindow tacWindow;
     @Getter
     private final PriceFeedService priceFeedService;
-    private final BisqEnvironment bisqEnvironment;
+    private final Config config;
+    private final LocalBitcoinNode localBitcoinNode;
     private final AccountAgeWitnessService accountAgeWitnessService;
     @Getter
     private final TorNetworkSettingsWindow torNetworkSettingsWindow;
@@ -132,7 +133,7 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
     private Timer checkNumberOfP2pNetworkPeersTimer;
     @SuppressWarnings("FieldCanBeLocal")
     private MonadicBinding<Boolean> tradesAndUIReady;
-    private Queue<Overlay> popupQueue = new PriorityQueue<>(Comparator.comparing(Overlay::getDisplayOrderPriority));
+    private Queue<Overlay<?>> popupQueue = new PriorityQueue<>(Comparator.comparing(Overlay::getDisplayOrderPriority));
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -158,7 +159,8 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
                          TacWindow tacWindow,
                          FeeService feeService,
                          PriceFeedService priceFeedService,
-                         BisqEnvironment bisqEnvironment,
+                         Config config,
+                         LocalBitcoinNode localBitcoinNode,
                          AccountAgeWitnessService accountAgeWitnessService,
                          TorNetworkSettingsWindow torNetworkSettingsWindow,
                          CorruptedDatabaseFilesHandler corruptedDatabaseFilesHandler) {
@@ -179,7 +181,8 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
         this.notificationCenter = notificationCenter;
         this.tacWindow = tacWindow;
         this.priceFeedService = priceFeedService;
-        this.bisqEnvironment = bisqEnvironment;
+        this.config = config;
+        this.localBitcoinNode = localBitcoinNode;
         this.accountAgeWitnessService = accountAgeWitnessService;
         this.torNetworkSettingsWindow = torNetworkSettingsWindow;
         this.corruptedDatabaseFilesHandler = corruptedDatabaseFilesHandler;
@@ -318,7 +321,7 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
                 .onClose(() -> BisqApp.getShutDownHandler().run())
                 .show());
 
-        bisqSetup.setDisplayUpdateHandler((alert, key) -> new DisplayUpdateDownloadWindow(alert)
+        bisqSetup.setDisplayUpdateHandler((alert, key) -> new DisplayUpdateDownloadWindow(alert, config)
                 .actionButtonText(Res.get("displayUpdateDownloadWindow.button.downloadLater"))
                 .onAction(() -> {
                     preferences.dontShowAgain(key, false); // update later
@@ -349,7 +352,8 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
                         .show());
         bisqSetup.setDisplayLocalhostHandler(key -> {
             if (!DevEnv.isDevMode()) {
-                Overlay popup = new Popup().backgroundInfo(Res.get("popup.bitcoinLocalhostNode.msg"))
+                Popup popup = new Popup().backgroundInfo(Res.get("popup.bitcoinLocalhostNode.msg") +
+                        Res.get("popup.bitcoinLocalhostNode.additionalRequirements"))
                         .dontShowAgainId(key);
                 popup.setDisplayOrderPriority(5);
                 popupQueue.add(popup);
@@ -368,9 +372,10 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
 
         bisqSetup.setRejectedTxErrorMessageHandler(msg -> new Popup().width(850).warning(msg).show());
 
+        bisqSetup.setShowPopupIfInvalidBtcConfigHandler(this::showPopupIfInvalidBtcConfig);
+
         corruptedDatabaseFilesHandler.getCorruptedDatabaseFiles().ifPresent(files -> new Popup()
-                .warning(Res.get("popup.warning.incompatibleDB", files.toString(),
-                        bisqEnvironment.getProperty(AppOptionKeys.APP_DATA_DIR_KEY)))
+                .warning(Res.get("popup.warning.incompatibleDB", files.toString(), config.appDataDir))
                 .useShutDownButton()
                 .show());
 
@@ -381,12 +386,14 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
         tradeManager.getTradesWithoutDepositTx().addListener((ListChangeListener<Trade>) c -> {
             c.next();
             if (c.wasAdded()) {
-                c.getAddedSubList().forEach(trade -> {
-                    new Popup().warning(Res.get("popup.warning.trade.depositTxNull", trade.getShortId()))
-                            .actionButtonText(Res.get("popup.warning.trade.depositTxNull.moveToFailedTrades"))
-                            .onAction(() -> tradeManager.addTradeToFailedTrades(trade))
-                            .show();
-                });
+                c.getAddedSubList().forEach(trade ->
+                        new Popup().warning(Res.get("popup.warning.trade.depositTxNull", trade.getShortId()))
+                                .actionButtonText(Res.get("popup.warning.trade.depositTxNull.shutDown"))
+                                .onAction(() -> BisqApp.getShutDownHandler().run())
+                                .secondaryActionButtonText(Res.get("popup.warning.trade.depositTxNull.moveToFailedTrades"))
+                                .onSecondaryAction(() -> tradeManager.addTradeToFailedTrades(trade))
+                                .show()
+                );
             }
         });
 
@@ -434,10 +441,14 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
                 checkNumberOfBtcPeersTimer = UserThread.runAfter(() -> {
                     // check again numPeers
                     if (walletsSetup.numPeersProperty().get() == 0) {
-                        if (bisqEnvironment.isBitcoinLocalhostNodeRunning())
-                            getWalletServiceErrorMsg().set(Res.get("mainView.networkWarning.localhostBitcoinLost", Res.getBaseCurrencyName().toLowerCase()));
+                        if (localBitcoinNode.shouldBeUsed())
+                            getWalletServiceErrorMsg().set(
+                                    Res.get("mainView.networkWarning.localhostBitcoinLost",
+                                            Res.getBaseCurrencyName().toLowerCase()));
                         else
-                            getWalletServiceErrorMsg().set(Res.get("mainView.networkWarning.allConnectionsLost", Res.getBaseCurrencyName().toLowerCase()));
+                            getWalletServiceErrorMsg().set(
+                                    Res.get("mainView.networkWarning.allConnectionsLost",
+                                            Res.getBaseCurrencyName().toLowerCase()));
                     } else {
                         getWalletServiceErrorMsg().set(null);
                     }
@@ -467,6 +478,14 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
         firstPopup.hide();
         preferences.setResyncSpvRequested(false);
         new Popup().information(Res.get("settings.net.reSyncSPVAfterRestartCompleted"))
+                .hideCloseButton()
+                .useShutDownButton()
+                .show();
+    }
+
+    private void showPopupIfInvalidBtcConfig() {
+        preferences.setBitcoinNodesOptionOrdinal(0);
+        new Popup().warning(Res.get("settings.net.warn.invalidBtcConfig"))
                 .hideCloseButton()
                 .useShutDownButton()
                 .show();
@@ -653,7 +672,7 @@ public class MainViewModel implements ViewModel, BisqSetup.BisqSetupListener {
 
     private void maybeShowPopupsFromQueue() {
         if (!popupQueue.isEmpty()) {
-            Overlay overlay = popupQueue.poll();
+            Overlay<?> overlay = popupQueue.poll();
             overlay.getIsHiddenProperty().addListener((observable, oldValue, newValue) -> {
                 if (newValue) {
                     UserThread.runAfter(this::maybeShowPopupsFromQueue, 2);

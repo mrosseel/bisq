@@ -26,6 +26,7 @@ import bisq.core.alert.PrivateNotificationManager;
 import bisq.core.alert.PrivateNotificationPayload;
 import bisq.core.btc.Balances;
 import bisq.core.btc.model.AddressEntry;
+import bisq.core.btc.nodes.LocalBitcoinNode;
 import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.WalletsManager;
@@ -33,6 +34,7 @@ import bisq.core.dao.DaoSetup;
 import bisq.core.dao.governance.asset.AssetService;
 import bisq.core.dao.governance.voteresult.VoteResultException;
 import bisq.core.dao.governance.voteresult.VoteResultService;
+import bisq.core.dao.state.unconfirmed.UnconfirmedBsqChangeOutputListService;
 import bisq.core.filter.FilterManager;
 import bisq.core.locale.Res;
 import bisq.core.notifications.MobileNotificationService;
@@ -74,6 +76,7 @@ import bisq.common.Timer;
 import bisq.common.UserThread;
 import bisq.common.app.DevEnv;
 import bisq.common.app.Log;
+import bisq.common.config.Config;
 import bisq.common.crypto.CryptoException;
 import bisq.common.crypto.KeyRing;
 import bisq.common.crypto.SealedAndSigned;
@@ -81,12 +84,11 @@ import bisq.common.proto.ProtobufferException;
 import bisq.common.util.Utilities;
 
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.RejectMessage;
 
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.inject.Singleton;
-
-import com.google.common.net.InetAddresses;
 
 import org.fxmisc.easybind.EasyBind;
 import org.fxmisc.easybind.monadic.MonadicBinding;
@@ -101,9 +103,6 @@ import javafx.collections.ListChangeListener;
 import javafx.collections.SetChangeListener;
 
 import org.spongycastle.crypto.params.KeyParameter;
-
-import java.net.InetSocketAddress;
-import java.net.Socket;
 
 import java.io.IOException;
 
@@ -126,6 +125,7 @@ import javax.annotation.Nullable;
 @Slf4j
 @Singleton
 public class BisqSetup {
+
     public interface BisqSetupListener {
         default void onInitP2pNetwork() {
             log.info("onInitP2pNetwork");
@@ -170,9 +170,10 @@ public class BisqSetup {
     private final ClockWatcher clockWatcher;
     private final FeeService feeService;
     private final DaoSetup daoSetup;
+    private final UnconfirmedBsqChangeOutputListService unconfirmedBsqChangeOutputListService;
     private final EncryptionService encryptionService;
     private final KeyRing keyRing;
-    private final BisqEnvironment bisqEnvironment;
+    private final Config config;
     private final AccountAgeWitnessService accountAgeWitnessService;
     private final SignedWitnessService signedWitnessService;
     private final MobileNotificationService mobileNotificationService;
@@ -187,6 +188,8 @@ public class BisqSetup {
     private final TorSetup torSetup;
     private final TradeLimits tradeLimits;
     private final CoinFormatter formatter;
+    private final LocalBitcoinNode localBitcoinNode;
+
     @Setter
     @Nullable
     private Consumer<Runnable> displayTacHandler;
@@ -219,6 +222,9 @@ public class BisqSetup {
     @Setter
     @Nullable
     private Consumer<PrivateNotificationPayload> displayPrivateNotificationHandler;
+    @Setter
+    @Nullable
+    private Runnable showPopupIfInvalidBtcConfigHandler;
 
     @Getter
     final BooleanProperty newVersionAvailableProperty = new SimpleBooleanProperty(false);
@@ -256,9 +262,10 @@ public class BisqSetup {
                      ClockWatcher clockWatcher,
                      FeeService feeService,
                      DaoSetup daoSetup,
+                     UnconfirmedBsqChangeOutputListService unconfirmedBsqChangeOutputListService,
                      EncryptionService encryptionService,
                      KeyRing keyRing,
-                     BisqEnvironment bisqEnvironment,
+                     Config config,
                      AccountAgeWitnessService accountAgeWitnessService,
                      SignedWitnessService signedWitnessService,
                      MobileNotificationService mobileNotificationService,
@@ -272,8 +279,8 @@ public class BisqSetup {
                      AssetService assetService,
                      TorSetup torSetup,
                      TradeLimits tradeLimits,
-                     @Named(FormattingUtils.BTC_FORMATTER_KEY) CoinFormatter formatter) {
-
+                     @Named(FormattingUtils.BTC_FORMATTER_KEY) CoinFormatter formatter,
+                     LocalBitcoinNode localBitcoinNode) {
 
         this.p2PNetworkSetup = p2PNetworkSetup;
         this.walletAppSetup = walletAppSetup;
@@ -302,9 +309,10 @@ public class BisqSetup {
         this.clockWatcher = clockWatcher;
         this.feeService = feeService;
         this.daoSetup = daoSetup;
+        this.unconfirmedBsqChangeOutputListService = unconfirmedBsqChangeOutputListService;
         this.encryptionService = encryptionService;
         this.keyRing = keyRing;
-        this.bisqEnvironment = bisqEnvironment;
+        this.config = config;
         this.accountAgeWitnessService = accountAgeWitnessService;
         this.signedWitnessService = signedWitnessService;
         this.mobileNotificationService = mobileNotificationService;
@@ -319,6 +327,7 @@ public class BisqSetup {
         this.torSetup = torSetup;
         this.tradeLimits = tradeLimits;
         this.formatter = formatter;
+        this.localBitcoinNode = localBitcoinNode;
     }
 
 
@@ -334,25 +343,21 @@ public class BisqSetup {
         UserThread.runPeriodically(() -> {
         }, 1);
         maybeReSyncSPVChain();
-        maybeShowTac();
+        maybeShowTac(this::step2);
     }
 
     private void step2() {
-        checkIfLocalHostNodeIsRunning();
-    }
-
-    private void step3() {
         torSetup.cleanupTorFiles();
-        readMapsFromResources();
+        readMapsFromResources(this::step3);
         checkCryptoSetup();
         checkForCorrectOSArchitecture();
     }
 
-    private void step4() {
-        startP2pNetworkAndWallet();
+    private void step3() {
+        startP2pNetworkAndWallet(this::step4);
     }
 
-    private void step5() {
+    private void step4() {
         initDomainServices();
 
         bisqSetupListeners.forEach(BisqSetupListener::onSetupComplete);
@@ -448,6 +453,11 @@ public class BisqSetup {
         if (preferences.isResyncSpvRequested()) {
             try {
                 walletsSetup.reSyncSPVChain();
+
+                // In case we had an unconfirmed change output we reset the unconfirmedBsqChangeOutputList so that
+                // after a SPV resync we do not have any dangling BSQ utxos in that list which would cause an incorrect
+                // BSQ balance state after the SPV resync.
+                unconfirmedBsqChangeOutputListService.onSpvResync();
             } catch (IOException e) {
                 log.error(e.toString());
                 e.printStackTrace();
@@ -455,45 +465,22 @@ public class BisqSetup {
         }
     }
 
-    private void maybeShowTac() {
+    private void maybeShowTac(Runnable nextStep) {
         if (!preferences.isTacAcceptedV120() && !DevEnv.isDevMode()) {
             if (displayTacHandler != null)
                 displayTacHandler.accept(() -> {
                     preferences.setTacAcceptedV120(true);
-                    step2();
+                    nextStep.run();
                 });
         } else {
-            step2();
+            nextStep.run();
         }
     }
 
-    private void checkIfLocalHostNodeIsRunning() {
-        // For DAO testnet we ignore local btc node
-        if (BisqEnvironment.getBaseCurrencyNetwork().isDaoRegTest() ||
-                BisqEnvironment.getBaseCurrencyNetwork().isDaoTestNet() ||
-                bisqEnvironment.isIgnoreLocalBtcNode()) {
-            step3();
-        } else {
-            new Thread(() -> {
-                try (Socket socket = new Socket()) {
-                    socket.connect(new InetSocketAddress(InetAddresses.forString("127.0.0.1"),
-                            BisqEnvironment.getBaseCurrencyNetwork().getParameters().getPort()), 5000);
-                    log.info("Localhost Bitcoin node detected.");
-                    UserThread.execute(() -> {
-                        bisqEnvironment.setBitcoinLocalhostNodeRunning(true);
-                        step3();
-                    });
-                } catch (Throwable e) {
-                    UserThread.execute(BisqSetup.this::step3);
-                }
-            }, "checkIfLocalHostNodeIsRunningThread").start();
-        }
-    }
-
-    private void readMapsFromResources() {
-        SetupUtils.readFromResources(p2PService.getP2PDataStorage()).addListener((observable, oldValue, newValue) -> {
+    private void readMapsFromResources(Runnable nextStep) {
+        SetupUtils.readFromResources(p2PService.getP2PDataStorage(), config).addListener((observable, oldValue, newValue) -> {
             if (newValue)
-                step4();
+                nextStep.run();
         });
     }
 
@@ -527,7 +514,7 @@ public class BisqSetup {
         }, "checkCryptoThread").start();
     }
 
-    private void startP2pNetworkAndWallet() {
+    private void startP2pNetworkAndWallet(Runnable nextStep) {
         ChangeListener<Boolean> walletInitializedListener = (observable, oldValue, newValue) -> {
             // TODO that seems to be called too often if Tor takes longer to start up...
             if (newValue && !p2pNetworkReady.get() && displayTorNetworkSettingsHandler != null)
@@ -535,9 +522,9 @@ public class BisqSetup {
         };
 
         Timer startupTimeout = UserThread.runAfter(() -> {
-            if (p2PNetworkSetup.p2pNetworkFailed.get()) {
-                // Skip this timeout action if the p2p network setup failed
-                // since a p2p network error prompt will be shown containing the error message
+            if (p2PNetworkSetup.p2pNetworkFailed.get() || walletsSetup.walletsSetupFailed.get()) {
+                // Skip this timeout action if the p2p network or wallet setup failed
+                // since an error prompt will be shown containing the error message
                 return;
             }
             log.warn("startupTimeout called");
@@ -557,7 +544,8 @@ public class BisqSetup {
 
         // We only init wallet service here if not using Tor for bitcoinj.
         // When using Tor, wallet init must be deferred until Tor is ready.
-        if (!preferences.getUseTorForBitcoinJ() || bisqEnvironment.isBitcoinLocalhostNodeRunning()) {
+        // TODO encapsulate below conditional inside getUseTorForBitcoinJ
+        if (!preferences.getUseTorForBitcoinJ() || localBitcoinNode.shouldBeUsed()) {
             initWallet();
         }
 
@@ -573,7 +561,7 @@ public class BisqSetup {
                 walletInitialized.removeListener(walletInitializedListener);
                 if (displayTorNetworkSettingsHandler != null)
                     displayTorNetworkSettingsHandler.accept(false);
-                step5();
+                nextStep.run();
             }
         });
     }
@@ -604,6 +592,7 @@ public class BisqSetup {
         walletAppSetup.init(chainFileLockedExceptionHandler,
                 spvFileCorruptedHandler,
                 showFirstPopupIfResyncSPVRequestedHandler,
+                showPopupIfInvalidBtcConfigHandler,
                 walletPasswordHandler,
                 () -> {
                     if (allBasicServicesInitialized) {
@@ -694,49 +683,78 @@ public class BisqSetup {
         balances.onAllServicesInitialized();
 
         walletAppSetup.getRejectedTxException().addListener((observable, oldValue, newValue) -> {
-            // We delay as we might get the rejected tx error before we have completed the create offer protocol
-            UserThread.runAfter(() -> {
-                if (rejectedTxErrorMessageHandler != null && newValue != null && newValue.getTxId() != null) {
-                    String txId = newValue.getTxId();
-                    openOfferManager.getObservableList().stream()
-                            .filter(openOffer -> txId.equals(openOffer.getOffer().getOfferFeePaymentTxId()))
-                            .forEach(openOffer -> {
-                                // We delay to avoid concurrent modification exceptions
-                                UserThread.runAfter(() -> {
-                                    openOffer.getOffer().setErrorMessage(newValue.getMessage());
-                                    rejectedTxErrorMessageHandler.accept(Res.get("popup.warning.openOffer.makerFeeTxRejected", openOffer.getId(), txId));
-                                    openOfferManager.removeOpenOffer(openOffer, () -> {
-                                        log.warn("We removed an open offer because the maker fee was rejected by the Bitcoin " +
-                                                "network. OfferId={}, txId={}", openOffer.getShortId(), txId);
-                                    }, log::warn);
-                                }, 1);
-                            });
+            if (newValue == null || newValue.getTxId() == null) {
+                return;
+            }
 
-                    tradeManager.getTradableList().stream()
-                            .filter(trade -> trade.getOffer() != null)
-                            .forEach(trade -> {
-                                String details = null;
-                                if (txId.equals(trade.getDepositTxId())) {
-                                    details = Res.get("popup.warning.trade.txRejected.deposit");
-                                }
-                                if (txId.equals(trade.getOffer().getOfferFeePaymentTxId()) || txId.equals(trade.getTakerFeeTxId())) {
-                                    details = Res.get("popup.warning.trade.txRejected.tradeFee");
-                                }
+            RejectMessage rejectMessage = newValue.getRejectMessage();
+            log.warn("We received reject message: {}", rejectMessage);
 
-                                if (details != null) {
+            // TODO: Find out which reject messages are critical and which not.
+            // We got a report where a "tx already known" message caused a failed trade but the deposit tx was valid.
+            // To avoid such false positives we only handle reject messages which we consider clearly critical.
+
+            switch (rejectMessage.getReasonCode()) {
+                case OBSOLETE:
+                case DUPLICATE:
+                case NONSTANDARD:
+                case CHECKPOINT:
+                case OTHER:
+                    // We ignore those cases to avoid that not critical reject messages trigger a failed trade.
+                    log.warn("We ignore that reject message as it is likely not critical.");
+                    break;
+                case MALFORMED:
+                case INVALID:
+                case DUST:
+                case INSUFFICIENTFEE:
+                    // We delay as we might get the rejected tx error before we have completed the create offer protocol
+                    log.warn("We handle that reject message as it is likely critical.");
+                    UserThread.runAfter(() -> {
+                        String txId = newValue.getTxId();
+                        openOfferManager.getObservableList().stream()
+                                .filter(openOffer -> txId.equals(openOffer.getOffer().getOfferFeePaymentTxId()))
+                                .forEach(openOffer -> {
                                     // We delay to avoid concurrent modification exceptions
-                                    String finalDetails = details;
                                     UserThread.runAfter(() -> {
-                                        trade.setErrorMessage(newValue.getMessage());
-                                        rejectedTxErrorMessageHandler.accept(Res.get("popup.warning.trade.txRejected",
-                                                finalDetails, trade.getShortId(), txId));
-                                        tradeManager.addTradeToFailedTrades(trade);
+                                        openOffer.getOffer().setErrorMessage(newValue.getMessage());
+                                        if (rejectedTxErrorMessageHandler != null) {
+                                            rejectedTxErrorMessageHandler.accept(Res.get("popup.warning.openOffer.makerFeeTxRejected", openOffer.getId(), txId));
+                                        }
+                                        openOfferManager.removeOpenOffer(openOffer, () -> {
+                                            log.warn("We removed an open offer because the maker fee was rejected by the Bitcoin " +
+                                                    "network. OfferId={}, txId={}", openOffer.getShortId(), txId);
+                                        }, log::warn);
                                     }, 1);
-                                }
-                            });
-                }
-            }, 3);
+                                });
+
+                        tradeManager.getTradableList().stream()
+                                .filter(trade -> trade.getOffer() != null)
+                                .forEach(trade -> {
+                                    String details = null;
+                                    if (txId.equals(trade.getDepositTxId())) {
+                                        details = Res.get("popup.warning.trade.txRejected.deposit");
+                                    }
+                                    if (txId.equals(trade.getOffer().getOfferFeePaymentTxId()) || txId.equals(trade.getTakerFeeTxId())) {
+                                        details = Res.get("popup.warning.trade.txRejected.tradeFee");
+                                    }
+
+                                    if (details != null) {
+                                        // We delay to avoid concurrent modification exceptions
+                                        String finalDetails = details;
+                                        UserThread.runAfter(() -> {
+                                            trade.setErrorMessage(newValue.getMessage());
+                                            if (rejectedTxErrorMessageHandler != null) {
+                                                rejectedTxErrorMessageHandler.accept(Res.get("popup.warning.trade.txRejected",
+                                                        finalDetails, trade.getShortId(), txId));
+                                            }
+                                            tradeManager.addTradeToFailedTrades(trade);
+                                        }, 1);
+                                    }
+                                });
+                    }, 3);
+            }
         });
+
 
         arbitratorManager.onAllServicesInitialized();
         mediatorManager.onAllServicesInitialized();
@@ -830,7 +848,7 @@ public class BisqSetup {
     }
 
     private void maybeShowLocalhostRunningInfo() {
-        maybeTriggerDisplayHandler("bitcoinLocalhostNode", displayLocalhostHandler, bisqEnvironment.isBitcoinLocalhostNodeRunning());
+        maybeTriggerDisplayHandler("bitcoinLocalhostNode", displayLocalhostHandler, localBitcoinNode.shouldBeUsed());
     }
 
     private void maybeShowAccountSigningStateInfo() {

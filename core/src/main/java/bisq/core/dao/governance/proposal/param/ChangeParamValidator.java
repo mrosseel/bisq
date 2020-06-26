@@ -17,7 +17,6 @@
 
 package bisq.core.dao.governance.proposal.param;
 
-import bisq.core.app.BisqEnvironment;
 import bisq.core.btc.wallet.Restrictions;
 import bisq.core.dao.governance.ConsensusCritical;
 import bisq.core.dao.governance.param.Param;
@@ -31,6 +30,8 @@ import bisq.core.locale.Res;
 import bisq.core.util.coin.BsqFormatter;
 import bisq.core.util.validation.BtcAddressValidator;
 import bisq.core.util.validation.InputValidator;
+
+import bisq.common.config.Config;
 
 import org.bitcoinj.core.Coin;
 
@@ -138,11 +139,8 @@ public class ChangeParamValidator extends ProposalValidator implements Consensus
             case PROPOSAL_FEE:
             case BLIND_VOTE_FEE:
                 break;
-
             case COMPENSATION_REQUEST_MIN_AMOUNT:
             case REIMBURSEMENT_MIN_AMOUNT:
-                checkArgument(inputValueAsCoin.value >= Restrictions.getMinNonDustOutput().value,
-                        Res.get("validation.amountBelowDust", Restrictions.getMinNonDustOutput().value));
             case COMPENSATION_REQUEST_MAX_AMOUNT:
             case REIMBURSEMENT_MAX_AMOUNT:
                 checkArgument(inputValueAsCoin.value >= Restrictions.getMinNonDustOutput().value,
@@ -150,7 +148,6 @@ public class ChangeParamValidator extends ProposalValidator implements Consensus
                 checkArgument(inputValueAsCoin.value <= 200000000,
                         Res.get("validation.inputTooLarge", "200 000 BSQ"));
                 break;
-
             case QUORUM_COMP_REQUEST:
             case QUORUM_REIMBURSEMENT:
             case QUORUM_CHANGE_PARAM:
@@ -212,7 +209,7 @@ public class ChangeParamValidator extends ProposalValidator implements Consensus
     }
 
     private void validateBlockValue(int currentParamValueAsBlock, int inputValueAsBlock, Param param) throws ParamValidationException {
-        boolean isMainnet = BisqEnvironment.getBaseCurrencyNetwork().isMainnet();
+        boolean isMainnet = Config.baseCurrencyNetwork().isMainnet();
         switch (param) {
             case LOCK_TIME_TRADE_PAYOUT:
                 break;

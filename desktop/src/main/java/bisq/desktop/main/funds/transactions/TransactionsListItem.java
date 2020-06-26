@@ -34,8 +34,6 @@ import bisq.core.trade.Tradable;
 import bisq.core.trade.Trade;
 import bisq.core.util.coin.CoinFormatter;
 
-import bisq.common.crypto.PubKeyRing;
-
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionConfidence;
@@ -69,6 +67,7 @@ class TransactionsListItem {
     private boolean received;
     private boolean detailsAvailable;
     private Coin amountAsCoin = Coin.ZERO;
+    private String memo = "";
     private int confirmations = 0;
     @Getter
     private final boolean isDustAttackTx;
@@ -89,11 +88,11 @@ class TransactionsListItem {
                          BsqWalletService bsqWalletService,
                          TransactionAwareTradable transactionAwareTradable,
                          DaoFacade daoFacade,
-                         PubKeyRing pubKeyRing,
                          CoinFormatter formatter,
                          long ignoreDustThreshold) {
         this.btcWalletService = btcWalletService;
         this.formatter = formatter;
+        this.memo = transaction.getMemo();
 
         txId = transaction.getHashAsString();
 
@@ -343,5 +342,7 @@ class TransactionsListItem {
     public String getNumConfirmations() {
         return String.valueOf(confirmations);
     }
+
+    public String getMemo() { return memo; }
 }
 

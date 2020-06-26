@@ -1,7 +1,5 @@
 package bisq.core.offer;
 
-import bisq.core.trade.TradableList;
-
 import bisq.network.p2p.P2PService;
 import bisq.network.p2p.peers.PeerManager;
 
@@ -9,6 +7,11 @@ import bisq.common.handlers.ErrorMessageHandler;
 import bisq.common.handlers.ResultHandler;
 import bisq.common.storage.CorruptedDatabaseFilesHandler;
 import bisq.common.storage.Storage;
+
+import java.nio.file.Files;
+
+import java.io.File;
+import java.io.IOException;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -24,10 +27,12 @@ import static org.mockito.Mockito.*;
 public class OpenOfferManagerTest {
 
     private CorruptedDatabaseFilesHandler corruptedDatabaseFilesHandler;
+    private File storageDir;
 
     @Before
     public void setUp() throws Exception {
         corruptedDatabaseFilesHandler = mock(CorruptedDatabaseFilesHandler.class);
+        storageDir = Files.createTempDirectory("storage").toFile();
     }
 
     @Test
@@ -40,8 +45,8 @@ public class OpenOfferManagerTest {
         final OpenOfferManager manager = new OpenOfferManager(null, null, null, p2PService,
                 null, null, null, offerBookService,
                 null, null, null,
-                null, null, null, null, null,
-                new Storage<TradableList<OpenOffer>>(null, null, corruptedDatabaseFilesHandler));
+                null, null, null, null, null, null,
+                new Storage<>(storageDir, null, corruptedDatabaseFilesHandler));
 
         AtomicBoolean startEditOfferSuccessful = new AtomicBoolean(false);
 
@@ -66,7 +71,7 @@ public class OpenOfferManagerTest {
     }
 
     @Test
-    public void testStartEditOfferForDeactivatedOffer() {
+    public void testStartEditOfferForDeactivatedOffer() throws IOException {
         P2PService p2PService = mock(P2PService.class);
         OfferBookService offerBookService = mock(OfferBookService.class);
         Storage storage = mock(Storage.class);
@@ -76,8 +81,8 @@ public class OpenOfferManagerTest {
         final OpenOfferManager manager = new OpenOfferManager(null, null, null, p2PService,
                 null, null, null, offerBookService,
                 null, null, null,
-                null, null, null, null, null,
-                new Storage<TradableList<OpenOffer>>(null, null, corruptedDatabaseFilesHandler));
+                null, null, null, null, null, null,
+                new Storage<>(storageDir, null, corruptedDatabaseFilesHandler));
 
         AtomicBoolean startEditOfferSuccessful = new AtomicBoolean(false);
 
@@ -104,8 +109,8 @@ public class OpenOfferManagerTest {
         final OpenOfferManager manager = new OpenOfferManager(null, null, null, p2PService,
                 null, null, null, offerBookService,
                 null, null, null,
-                null, null, null, null, null,
-                new Storage<TradableList<OpenOffer>>(null, null, corruptedDatabaseFilesHandler));
+                null, null, null, null, null, null,
+                new Storage<>(storageDir, null, corruptedDatabaseFilesHandler));
 
         AtomicBoolean startEditOfferSuccessful = new AtomicBoolean(false);
 

@@ -22,6 +22,8 @@ import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.TradeWalletService;
 import bisq.core.dao.DaoFacade;
 import bisq.core.exceptions.TradePriceOutOfToleranceException;
+import bisq.core.locale.Res;
+import bisq.core.filter.FilterManager;
 import bisq.core.offer.availability.DisputeAgentSelection;
 import bisq.core.offer.messages.OfferAvailabilityRequest;
 import bisq.core.offer.messages.OfferAvailabilityResponse;
@@ -110,6 +112,7 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
     private final MediatorManager mediatorManager;
     private final RefundAgentManager refundAgentManager;
     private final DaoFacade daoFacade;
+    private final FilterManager filterManager;
     private final Storage<TradableList<OpenOffer>> openOfferTradableListStorage;
     private final Map<String, OpenOffer> offersToBeEdited = new HashMap<>();
     private boolean stopped;
@@ -138,6 +141,7 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
                             MediatorManager mediatorManager,
                             RefundAgentManager refundAgentManager,
                             DaoFacade daoFacade,
+                            FilterManager filterManager,
                             Storage<TradableList<OpenOffer>> storage) {
         this.createOfferService = createOfferService;
         this.keyRing = keyRing;
@@ -155,13 +159,13 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
         this.mediatorManager = mediatorManager;
         this.refundAgentManager = refundAgentManager;
         this.daoFacade = daoFacade;
+        this.filterManager = filterManager;
 
         openOfferTradableListStorage = storage;
 
         // In case the app did get killed the shutDown from the modules is not called, so we use a shutdown hook
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            UserThread.execute(OpenOfferManager.this::shutDown);
-        }, "OpenOfferManager.ShutDownHook"));
+        Runtime.getRuntime().addShutdownHook(new Thread(() ->
+                UserThread.execute(OpenOfferManager.this::shutDown), "OpenOfferManager.ShutDownHook"));
     }
 
     @Override
@@ -220,7 +224,9 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
         int size = openOffers != null ? openOffers.size() : 0;
         log.info("Remove open offers at shutDown. Number of open offers: {}", size);
         if (offerBookService.isBootstrapped() && size > 0) {
-            openOffers.forEach(openOffer -> offerBookService.removeOfferAtShutDown(openOffer.getOffer().getOfferPayload()));
+            UserThread.execute(() -> openOffers.forEach(
+                    openOffer -> offerBookService.removeOfferAtShutDown(openOffer.getOffer().getOfferPayload())
+            ));
             if (completeHandler != null)
                 UserThread.runAfter(completeHandler, size * 200 + 500, TimeUnit.MILLISECONDS);
         } else {
@@ -359,7 +365,8 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
                 arbitratorManager,
                 tradeStatisticsManager,
                 daoFacade,
-                user);
+                user,
+                filterManager);
         PlaceOfferProtocol placeOfferProtocol = new PlaceOfferProtocol(
                 model,
                 transaction -> {
@@ -637,6 +644,12 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
                 availabilityResult = AvailabilityResult.OFFER_TAKEN;
             }
 
+            if (btcWalletService.isUnconfirmedTransactionsLimitHit() || bsqWalletService.isUnconfirmedTransactionsLimitHit()) {
+                errorMessage = Res.get("shared.unconfirmedTransactionsLimitReached");
+                log.warn(errorMessage);
+                availabilityResult = AvailabilityResult.UNKNOWN_FAILURE;
+            }
+
             OfferAvailabilityResponse offerAvailabilityResponse = new OfferAvailabilityResponse(request.offerId,
                     availabilityResult,
                     arbitratorNodeAddress,
@@ -732,25 +745,46 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
 
             if (originalOfferPayload.getProtocolVersion() < Version.TRADE_PROTOCOL_VERSION ||
                     !OfferRestrictions.hasOfferMandatoryCapability(originalOffer, Capability.MEDIATION) ||
-                    !OfferRestrictions.hasOfferMandatoryCapability(originalOffer, Capability.REFUND_AGENT)) {
+                    !OfferRestrictions.hasOfferMandatoryCapability(originalOffer, Capability.REFUND_AGENT) ||
+                    !originalOfferPayload.getOwnerNodeAddress().equals(p2PService.getAddress())) {
+
+                // - Capabilities changed?
                 // We rewrite our offer with the additional capabilities entry
-
-                Map<String, String> originalExtraDataMap = originalOfferPayload.getExtraDataMap();
                 Map<String, String> updatedExtraDataMap = new HashMap<>();
+                if (!OfferRestrictions.hasOfferMandatoryCapability(originalOffer, Capability.MEDIATION) ||
+                        !OfferRestrictions.hasOfferMandatoryCapability(originalOffer, Capability.REFUND_AGENT)) {
+                    Map<String, String> originalExtraDataMap = originalOfferPayload.getExtraDataMap();
 
-                if (originalExtraDataMap != null) {
-                    updatedExtraDataMap.putAll(originalExtraDataMap);
+                    if (originalExtraDataMap != null) {
+                        updatedExtraDataMap.putAll(originalExtraDataMap);
+                    }
+
+                    // We overwrite any entry with our current capabilities
+                    updatedExtraDataMap.put(OfferPayload.CAPABILITIES, Capabilities.app.toStringList());
+
+                    log.info("Converted offer to support new Capability.MEDIATION and Capability.REFUND_AGENT capability. id={}", originalOffer.getId());
+                } else {
+                    updatedExtraDataMap = originalOfferPayload.getExtraDataMap();
                 }
 
-                // We overwrite any entry with our current capabilities
-                updatedExtraDataMap.put(OfferPayload.CAPABILITIES, Capabilities.app.toStringList());
+                // - Protocol version changed?
+                int protocolVersion = originalOfferPayload.getProtocolVersion();
+                if (protocolVersion < Version.TRADE_PROTOCOL_VERSION) {
+                    // We update the trade protocol version
+                    protocolVersion = Version.TRADE_PROTOCOL_VERSION;
+                    log.info("Updated the protocol version of offer id={}", originalOffer.getId());
+                }
 
-                // We update the trade protocol version
-                int protocolVersion = Version.TRADE_PROTOCOL_VERSION;
+                // - node address changed? (due to a faulty tor dir)
+                NodeAddress ownerNodeAddress = originalOfferPayload.getOwnerNodeAddress();
+                if (!ownerNodeAddress.equals(p2PService.getAddress())) {
+                    ownerNodeAddress = p2PService.getAddress();
+                    log.info("Updated the owner nodeaddress of offer id={}", originalOffer.getId());
+                }
 
                 OfferPayload updatedPayload = new OfferPayload(originalOfferPayload.getId(),
                         originalOfferPayload.getDate(),
-                        originalOfferPayload.getOwnerNodeAddress(),
+                        ownerNodeAddress,
                         originalOfferPayload.getPubKeyRing(),
                         originalOfferPayload.getDirection(),
                         originalOfferPayload.getPrice(),
@@ -807,7 +841,7 @@ public class OpenOfferManager implements PeerManager.Listener, DecryptedDirectMe
                 updatedOpenOffer.setStorage(openOfferTradableListStorage);
                 openOffers.add(updatedOpenOffer);
 
-                log.info("Converted offer to support new Capability.MEDIATION and Capability.REFUND_AGENT capability. id={}", originalOffer.getId());
+                log.info("Updating offer completed. id={}", originalOffer.getId());
             }
         });
     }

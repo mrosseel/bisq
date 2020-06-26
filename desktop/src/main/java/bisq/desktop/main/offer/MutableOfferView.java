@@ -45,13 +45,13 @@ import bisq.desktop.main.portfolio.PortfolioView;
 import bisq.desktop.main.portfolio.openoffer.OpenOffersView;
 import bisq.desktop.util.GUIUtil;
 import bisq.desktop.util.Layout;
-import bisq.desktop.util.Transitions;
 
 import bisq.core.locale.CurrencyUtil;
 import bisq.core.locale.Res;
 import bisq.core.locale.TradeCurrency;
 import bisq.core.offer.Offer;
 import bisq.core.offer.OfferPayload;
+import bisq.core.payment.FasterPaymentsAccount;
 import bisq.core.payment.PaymentAccount;
 import bisq.core.payment.payload.PaymentMethod;
 import bisq.core.user.DontShowAgainLookup;
@@ -125,7 +125,6 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
     public static final String BUYER_SECURITY_DEPOSIT_NEWS = "buyerSecurityDepositNews0.9.5";
     protected final Navigation navigation;
     private final Preferences preferences;
-    private final Transitions transitions;
     private final OfferDetailsWindow offerDetailsWindow;
     private final CoinFormatter btcFormatter;
     private final BsqFormatter bsqFormatter;
@@ -146,7 +145,8 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
     private FundsTextField totalToPayTextField;
     private Label amountDescriptionLabel, priceCurrencyLabel, priceDescriptionLabel, volumeDescriptionLabel,
             waitingForFundsLabel, marketBasedPriceLabel, percentagePriceDescription, tradeFeeDescriptionLabel,
-            resultLabel, tradeFeeInBtcLabel, tradeFeeInBsqLabel, xLabel, fakeXLabel, buyerSecurityDepositLabel;
+            resultLabel, tradeFeeInBtcLabel, tradeFeeInBsqLabel, xLabel, fakeXLabel, buyerSecurityDepositLabel,
+            buyerSecurityDepositPercentageLabel;
     protected Label amountBtcLabel, volumeCurrencyLabel, minAmountBtcLabel;
     private ComboBox<PaymentAccount> paymentAccountsComboBox;
     private ComboBox<TradeCurrency> currencyComboBox;
@@ -157,11 +157,13 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
             priceAsPercentageValueCurrencyBox, volumeValueCurrencyBox, priceValueCurrencyBox,
             minAmountValueCurrencyBox, advancedOptionsBox, paymentGroupBox;
 
-    private Subscription isWaitingForFundsSubscription, balanceSubscription, cancelButton2StyleSubscription;
+    private Subscription isWaitingForFundsSubscription, balanceSubscription;
     private ChangeListener<Boolean> amountFocusedListener, minAmountFocusedListener, volumeFocusedListener,
             buyerSecurityDepositFocusedListener, priceFocusedListener, placeOfferCompletedListener,
             priceAsPercentageFocusedListener, getShowWalletFundedNotificationListener,
-            tradeFeeInBtcToggleListener, tradeFeeInBsqToggleListener, tradeFeeVisibleListener;
+            tradeFeeInBtcToggleListener, tradeFeeInBsqToggleListener, tradeFeeVisibleListener,
+            isMinBuyerSecurityDepositListener;
+    private ChangeListener<Coin> missingCoinListener;
     private ChangeListener<String> tradeCurrencyCodeListener, errorMessageListener,
             marketPriceMarginListener, volumeListener, buyerSecurityDepositInBTCListener;
     private ChangeListener<Number> marketPriceAvailableListener;
@@ -170,7 +172,7 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
 
     protected int gridRow = 0;
     private final List<Node> editOfferElements = new ArrayList<>();
-    private boolean clearXchangeWarningDisplayed, isActivated;
+    private boolean clearXchangeWarningDisplayed, fasterPaymentsWarningDisplayed, isActivated;
     private InfoInputTextField marketBasedPriceInfoInputTextField, volumeInfoInputTextField,
             buyerSecurityDepositInfoInputTextField;
     private AutoTooltipSlideToggleButton tradeFeeInBtcToggle, tradeFeeInBsqToggle;
@@ -183,7 +185,6 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
     public MutableOfferView(M model,
                             Navigation navigation,
                             Preferences preferences,
-                            Transitions transitions,
                             OfferDetailsWindow offerDetailsWindow,
                             CoinFormatter btcFormatter,
                             BsqFormatter bsqFormatter) {
@@ -191,7 +192,6 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
 
         this.navigation = navigation;
         this.preferences = preferences;
-        this.transitions = transitions;
         this.offerDetailsWindow = offerDetailsWindow;
         this.btcFormatter = btcFormatter;
         this.bsqFormatter = bsqFormatter;
@@ -456,15 +456,6 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         qrCodeImageView.setVisible(true);
         balanceTextField.setVisible(true);
         cancelButton2.setVisible(true);
-
-        final byte[] imageBytes = QRCode
-                .from(getBitcoinURI())
-                .withSize(98, 98) // code has 41 elements 8 px is border with 98 we get double scale and min. border
-                .to(ImageType.PNG)
-                .stream()
-                .toByteArray();
-        Image qrImage = new Image(new ByteArrayInputStream(imageBytes));
-        qrCodeImageView.setImage(qrImage);
     }
 
     private void updateOfferElementsStyle() {
@@ -494,8 +485,16 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         if (paymentAccount.getPaymentMethod().getId().equals(PaymentMethod.CLEAR_X_CHANGE_ID) &&
                 !clearXchangeWarningDisplayed) {
             clearXchangeWarningDisplayed = true;
-            UserThread.runAfter(GUIUtil::showClearXchangeWarning,
-                    500, TimeUnit.MILLISECONDS);
+            UserThread.runAfter(GUIUtil::showClearXchangeWarning, 500, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void maybeShowFasterPaymentsWarning(PaymentAccount paymentAccount) {
+        if (paymentAccount.getPaymentMethod().getId().equals(PaymentMethod.FASTER_PAYMENTS_ID) &&
+                ((FasterPaymentsAccount) paymentAccount).getHolderName().isEmpty() &&
+                !fasterPaymentsWarningDisplayed) {
+            fasterPaymentsWarningDisplayed = true;
+            UserThread.runAfter(() -> GUIUtil.showFasterPaymentsWarning(navigation), 500, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -507,6 +506,7 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         PaymentAccount paymentAccount = paymentAccountsComboBox.getSelectionModel().getSelectedItem();
         if (paymentAccount != null) {
             maybeShowClearXchangeWarning(paymentAccount);
+            maybeShowFasterPaymentsWarning(paymentAccount);
 
             currencySelection.setVisible(paymentAccount.hasMultipleCurrencies());
             currencySelection.setManaged(paymentAccount.hasMultipleCurrencies());
@@ -664,15 +664,11 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
             waitingForFundsLabel.setManaged(isWaitingForFunds);
         });
 
-        cancelButton2StyleSubscription = EasyBind.subscribe(placeOfferButton.visibleProperty(),
-                isVisible -> cancelButton2.setId(isVisible ? "cancel-button" : null));
-
         balanceSubscription = EasyBind.subscribe(model.getDataModel().getBalance(), balanceTextField::setBalance);
     }
 
     private void removeSubscriptions() {
         isWaitingForFundsSubscription.unsubscribe();
-        cancelButton2StyleSubscription.unsubscribe();
         balanceSubscription.unsubscribe();
     }
 
@@ -769,6 +765,21 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         volumeListener = (observable, oldValue, newValue) -> {
             if (!newValue.equals("") && CurrencyUtil.isFiatCurrency(model.tradeCurrencyCode.get())) {
                 volumeInfoInputTextField.setContentForPrivacyPopOver(createPopoverLabel(Res.get("offerbook.info.roundedFiatVolume")));
+            } else {
+                volumeInfoInputTextField.hideInfoContent();
+            }
+        };
+
+        missingCoinListener = (observable, oldValue, newValue) -> {
+            if (!newValue.toString().equals("")) {
+                final byte[] imageBytes = QRCode
+                        .from(getBitcoinURI())
+                        .withSize(98, 98) // code has 41 elements 8 px is border with 98 we get double scale and min. border
+                        .to(ImageType.PNG)
+                        .stream()
+                        .toByteArray();
+                Image qrImage = new Image(new ByteArrayInputStream(imageBytes));
+                qrCodeImageView.setImage(qrImage);
             }
         };
 
@@ -829,6 +840,18 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
                 tradeFeeInBsqToggle.setVisible(newValue);
             }
         };
+
+        isMinBuyerSecurityDepositListener = ((observable, oldValue, newValue) -> {
+            if (newValue) {
+                // show BTC
+                buyerSecurityDepositPercentageLabel.setText(Res.getBaseCurrencyCode());
+                buyerSecurityDepositInputTextField.setDisable(true);
+            } else {
+                // show %
+                buyerSecurityDepositPercentageLabel.setText("%");
+                buyerSecurityDepositInputTextField.setDisable(false);
+            }
+        });
     }
 
     private void setIsCurrencyForMakerFeeBtc(boolean isCurrencyForMakerFeeBtc) {
@@ -864,8 +887,10 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         model.marketPriceAvailableProperty.addListener(marketPriceAvailableListener);
         model.marketPriceMargin.addListener(marketPriceMarginListener);
         model.volume.addListener(volumeListener);
+        model.getDataModel().missingCoin.addListener(missingCoinListener);
         model.isTradeFeeVisible.addListener(tradeFeeVisibleListener);
         model.buyerSecurityDepositInBTC.addListener(buyerSecurityDepositInBTCListener);
+        model.isMinBuyerSecurityDeposit.addListener(isMinBuyerSecurityDepositListener);
 
         tradeFeeInBtcToggle.selectedProperty().addListener(tradeFeeInBtcToggleListener);
         tradeFeeInBsqToggle.selectedProperty().addListener(tradeFeeInBsqToggleListener);
@@ -897,10 +922,12 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         model.marketPriceAvailableProperty.removeListener(marketPriceAvailableListener);
         model.marketPriceMargin.removeListener(marketPriceMarginListener);
         model.volume.removeListener(volumeListener);
+        model.getDataModel().missingCoin.removeListener(missingCoinListener);
         model.isTradeFeeVisible.removeListener(tradeFeeVisibleListener);
         model.buyerSecurityDepositInBTC.removeListener(buyerSecurityDepositInBTCListener);
         tradeFeeInBtcToggle.selectedProperty().removeListener(tradeFeeInBtcToggleListener);
         tradeFeeInBsqToggle.selectedProperty().removeListener(tradeFeeInBsqToggleListener);
+        model.isMinBuyerSecurityDeposit.removeListener(isMinBuyerSecurityDepositListener);
 
         // focus out
         amountTextField.focusedProperty().removeListener(amountFocusedListener);
@@ -1109,7 +1136,7 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
                 Res.get("createOffer.securityDeposit.prompt"));
         buyerSecurityDepositInfoInputTextField = tuple.second;
         buyerSecurityDepositInputTextField = buyerSecurityDepositInfoInputTextField.getInputTextField();
-        Label buyerSecurityDepositPercentageLabel = tuple.third;
+        buyerSecurityDepositPercentageLabel = tuple.third;
         // getEditableValueBox delivers BTC, so we overwrite it with %
         buyerSecurityDepositPercentageLabel.setText("%");
 
@@ -1282,7 +1309,7 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
                 Res.get("shared.distanceInPercent"));
         percentagePriceDescription = priceAsPercentageInputBoxTuple.first;
 
-        getSmallIconForLabel(MaterialDesignIcon.CHART_LINE, percentagePriceDescription);
+        getSmallIconForLabel(MaterialDesignIcon.CHART_LINE, percentagePriceDescription, "small-icon-label");
 
         percentagePriceBox = priceAsPercentageInputBoxTuple.second;
 
@@ -1355,7 +1382,7 @@ public abstract class MutableOfferView<M extends MutableOfferViewModel<?>> exten
         Tuple2<Label, VBox> priceInputBoxTuple = getTradeInputBox(priceValueCurrencyBox, "");
         priceDescriptionLabel = priceInputBoxTuple.first;
 
-        getSmallIconForLabel(MaterialDesignIcon.LOCK, priceDescriptionLabel);
+        getSmallIconForLabel(MaterialDesignIcon.LOCK, priceDescriptionLabel, "small-icon-label");
 
         editOfferElements.add(priceDescriptionLabel);
         fixedPriceBox = priceInputBoxTuple.second;

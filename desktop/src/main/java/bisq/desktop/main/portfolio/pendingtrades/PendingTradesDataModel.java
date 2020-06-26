@@ -31,6 +31,7 @@ import bisq.desktop.util.GUIUtil;
 import bisq.core.account.witness.AccountAgeWitnessService;
 import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.btc.wallet.BtcWalletService;
+import bisq.core.dao.DaoFacade;
 import bisq.core.locale.Res;
 import bisq.core.offer.Offer;
 import bisq.core.offer.OfferPayload;
@@ -49,10 +50,13 @@ import bisq.core.trade.BuyerTrade;
 import bisq.core.trade.SellerTrade;
 import bisq.core.trade.Trade;
 import bisq.core.trade.TradeManager;
+import bisq.core.trade.messages.RefreshTradeStateRequest;
 import bisq.core.user.Preferences;
 import bisq.core.util.FormattingUtils;
 
+import bisq.network.p2p.NodeAddress;
 import bisq.network.p2p.P2PService;
+import bisq.network.p2p.SendMailboxMessageListener;
 
 import bisq.common.crypto.PubKeyRing;
 import bisq.common.handlers.ErrorMessageHandler;
@@ -77,6 +81,7 @@ import javafx.collections.ObservableList;
 
 import org.spongycastle.crypto.params.KeyParameter;
 
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import lombok.Getter;
@@ -95,6 +100,7 @@ public class PendingTradesDataModel extends ActivatableDataModel {
     private final WalletsSetup walletsSetup;
     @Getter
     private final AccountAgeWitnessService accountAgeWitnessService;
+    public final DaoFacade daoFacade;
     public final Navigation navigation;
     public final WalletPasswordWindow walletPasswordWindow;
     private final NotificationCenter notificationCenter;
@@ -130,6 +136,7 @@ public class PendingTradesDataModel extends ActivatableDataModel {
                                   P2PService p2PService,
                                   WalletsSetup walletsSetup,
                                   AccountAgeWitnessService accountAgeWitnessService,
+                                  DaoFacade daoFacade,
                                   Navigation navigation,
                                   WalletPasswordWindow walletPasswordWindow,
                                   NotificationCenter notificationCenter) {
@@ -143,6 +150,7 @@ public class PendingTradesDataModel extends ActivatableDataModel {
         this.p2PService = p2PService;
         this.walletsSetup = walletsSetup;
         this.accountAgeWitnessService = accountAgeWitnessService;
+        this.daoFacade = daoFacade;
         this.navigation = navigation;
         this.walletPasswordWindow = walletPasswordWindow;
         this.notificationCenter = notificationCenter;
@@ -229,6 +237,44 @@ public class PendingTradesDataModel extends ActivatableDataModel {
 
     public void onMoveToFailedTrades() {
         tradeManager.addTradeToFailedTrades(getTrade());
+    }
+
+    // Ask counterparty to resend last action (in case message was lost)
+    public void refreshTradeState() {
+        Trade trade = getTrade();
+        if (trade == null || !trade.allowedRefresh()) return;
+
+        trade.logRefresh();
+        NodeAddress tradingPeerNodeAddress = trade.getTradingPeerNodeAddress();
+
+        RefreshTradeStateRequest refreshReq = new RefreshTradeStateRequest(UUID.randomUUID().toString(),
+                trade.getId(),
+                tradingPeerNodeAddress);
+        p2PService.sendEncryptedMailboxMessage(
+                tradingPeerNodeAddress,
+                trade.getProcessModel().getTradingPeer().getPubKeyRing(),
+                refreshReq,
+                new SendMailboxMessageListener() {
+                    @Override
+                    public void onArrived() {
+                        log.info("SendMailboxMessageListener onArrived tradeId={} at peer {}",
+                                trade.getId(), tradingPeerNodeAddress);
+                    }
+
+                    @Override
+                    public void onStoredInMailbox() {
+                        log.info("SendMailboxMessageListener onStoredInMailbox tradeId={} at peer {}",
+                                trade.getId(), tradingPeerNodeAddress);
+                    }
+
+                    @Override
+                    public void onFault(String errorMessage) {
+                        log.error("SendMailboxMessageListener onFault tradeId={} at peer {}",
+                                trade.getId(), tradingPeerNodeAddress);
+                    }
+                }
+        );
+        tradeManager.persistTrades();
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -545,6 +591,7 @@ public class PendingTradesDataModel extends ActivatableDataModel {
             resultHandler = () -> navigation.navigateTo(MainView.class, SupportView.class, RefundClientView.class);
 
             if (trade.getDelayedPayoutTx() == null) {
+                log.error("Delayed payout tx is missing");
                 return;
             }
 

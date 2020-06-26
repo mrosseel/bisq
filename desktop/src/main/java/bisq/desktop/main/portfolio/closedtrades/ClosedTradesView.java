@@ -30,7 +30,6 @@ import bisq.desktop.util.DisplayUtils;
 import bisq.desktop.util.GUIUtil;
 
 import bisq.core.alert.PrivateNotificationManager;
-import bisq.core.app.AppOptionKeys;
 import bisq.core.locale.Res;
 import bisq.core.offer.Offer;
 import bisq.core.offer.OpenOffer;
@@ -38,16 +37,15 @@ import bisq.core.trade.Contract;
 import bisq.core.trade.Tradable;
 import bisq.core.trade.Trade;
 import bisq.core.user.Preferences;
-import bisq.core.util.FormattingUtils;
-import bisq.core.util.coin.CoinFormatter;
 
 import bisq.network.p2p.NodeAddress;
 
+import bisq.common.config.Config;
+
 import com.googlecode.jcsv.writer.CSVEntryConverter;
 
-import javax.inject.Named;
-
 import javax.inject.Inject;
+import javax.inject.Named;
 
 import javafx.fxml.FXML;
 
@@ -84,7 +82,7 @@ public class ClosedTradesView extends ActivatableViewAndModel<VBox, ClosedTrades
     @FXML
     TableView<ClosedTradableListItem> tableView;
     @FXML
-    TableColumn<ClosedTradableListItem, ClosedTradableListItem> priceColumn, amountColumn, volumeColumn, txFeeColumn, makerFeeColumn, buyerSecurityDepositColumn, sellerSecurityDepositColumn,
+    TableColumn<ClosedTradableListItem, ClosedTradableListItem> priceColumn, amountColumn, volumeColumn, txFeeColumn, tradeFeeColumn, buyerSecurityDepositColumn, sellerSecurityDepositColumn,
             marketColumn, directionColumn, dateColumn, tradeIdColumn, stateColumn, avatarColumn;
     @FXML
     HBox footerBox;
@@ -99,7 +97,6 @@ public class ClosedTradesView extends ActivatableViewAndModel<VBox, ClosedTrades
 
     private final OfferDetailsWindow offerDetailsWindow;
     private Preferences preferences;
-    private final CoinFormatter formatter;
     private final TradeDetailsWindow tradeDetailsWindow;
     private final PrivateNotificationManager privateNotificationManager;
     private SortedList<ClosedTradableListItem> sortedList;
@@ -112,21 +109,19 @@ public class ClosedTradesView extends ActivatableViewAndModel<VBox, ClosedTrades
                             Preferences preferences,
                             TradeDetailsWindow tradeDetailsWindow,
                             PrivateNotificationManager privateNotificationManager,
-                            @Named(FormattingUtils.BTC_FORMATTER_KEY) CoinFormatter formatter,
-                            @Named(AppOptionKeys.USE_DEV_PRIVILEGE_KEYS) boolean useDevPrivilegeKeys) {
+                            @Named(Config.USE_DEV_PRIVILEGE_KEYS) boolean useDevPrivilegeKeys) {
         super(model);
         this.offerDetailsWindow = offerDetailsWindow;
         this.preferences = preferences;
         this.tradeDetailsWindow = tradeDetailsWindow;
         this.privateNotificationManager = privateNotificationManager;
-        this.formatter = formatter;
         this.useDevPrivilegeKeys = useDevPrivilegeKeys;
     }
 
 	@Override
 	public void initialize() {
 		txFeeColumn.setGraphic(new AutoTooltipLabel(Res.get("shared.txFee")));
-		makerFeeColumn.setGraphic(new AutoTooltipLabel(Res.get("shared.makerFee")));
+		tradeFeeColumn.setGraphic(new AutoTooltipLabel(Res.get("shared.tradeFee")));
 		buyerSecurityDepositColumn.setGraphic(new AutoTooltipLabel(Res.get("shared.buyerSecurityDeposit")));
 		sellerSecurityDepositColumn.setGraphic(new AutoTooltipLabel(Res.get("shared.sellerSecurityDeposit")));
         priceColumn.setGraphic(new AutoTooltipLabel(Res.get("shared.price")));
@@ -146,7 +141,7 @@ public class ClosedTradesView extends ActivatableViewAndModel<VBox, ClosedTrades
         setDirectionColumnCellFactory();
         setAmountColumnCellFactory();
 		setTxFeeColumnCellFactory();
-		setMakerFeeColumnCellFactory();
+		setTradeFeeColumnCellFactory();
 		setBuyerSecurityDepositColumnCellFactory();
 		setSellerSecurityDepositColumnCellFactory();
         setPriceColumnCellFactory();
@@ -172,7 +167,7 @@ public class ClosedTradesView extends ActivatableViewAndModel<VBox, ClosedTrades
         txFeeColumn.setComparator(nullsFirstComparing(o ->
                 o instanceof Trade ? ((Trade) o).getTxFee() : o.getOffer().getTxFee()
         ));
-        makerFeeColumn.setComparator(nullsFirstComparing(o ->
+        tradeFeeColumn.setComparator(nullsFirstComparing(o ->
                 o instanceof Trade ? ((Trade) o).getTakerFee() : o.getOffer().getMakerFee()
         ));
         buyerSecurityDepositColumn.setComparator(nullsFirstComparing(o ->
@@ -523,9 +518,9 @@ public class ClosedTradesView extends ActivatableViewAndModel<VBox, ClosedTrades
                 });
 	}
 
-	private void setMakerFeeColumnCellFactory() {
-		makerFeeColumn.setCellValueFactory((offer) -> new ReadOnlyObjectWrapper<>(offer.getValue()));
-		makerFeeColumn.setCellFactory(
+	private void setTradeFeeColumnCellFactory() {
+		tradeFeeColumn.setCellValueFactory((offer) -> new ReadOnlyObjectWrapper<>(offer.getValue()));
+		tradeFeeColumn.setCellFactory(
                 new Callback<>() {
                     @Override
                     public TableCell<ClosedTradableListItem, ClosedTradableListItem> call(
