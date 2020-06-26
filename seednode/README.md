@@ -1,6 +1,5 @@
 # Bisq Seed Node
 
-<<<<<<< HEAD
 ## Running using systemd
 
 * Install bisq-seednode.service in /etc/systemd/system
@@ -10,7 +9,6 @@
 * Then you can do:
 
 
-=======
 ## Hardware
 
 Highly recommended to use SSD! Minimum specs:
@@ -32,7 +30,6 @@ The following OS's are known to work well:
 Start with a clean Ubuntu server installation, and run the script
 ```bash
 curl -s https://raw.githubusercontent.com/bisq-network/bisq/master/seednode/install_seednode_debian.sh | sudo bash
->>>>>>> a54eeeabccd1c48bdfc03dc3313ffb983a921325
 ```
 
 This will install and configure Tor, Bitcoin, and Bisq-Seednode services to start on boot.
@@ -103,8 +100,8 @@ If you need to start over, you can run the uninstall script in this repo
 ```bash
 sudo ./delete_seednode_debian.sh
 ```
-<<<<<<< HEAD
 
+WARNING: this script will delete all data!
 
 ## Running using docker (experimental)
 
@@ -151,7 +148,4 @@ the seednode once btcd is running will fix this. (note: this is a bug in the see
 - fix startup bug
 - publish image
 - remove hardcoded docker ip addresses (it works, but might be done prettier)
-=======
-WARNING: this script will delete all data!
 
->>>>>>> a54eeeabccd1c48bdfc03dc3313ffb983a921325
