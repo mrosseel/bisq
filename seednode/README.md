@@ -1,14 +1,5 @@
 # Bisq Seed Node
 
-## Running using systemd
-
-* Install bisq-seednode.service in /etc/systemd/system
-* Install bisq-seednode in /etc/default
-* Install blocknotify.sh in bitcoind's ~/.bitcoin/ folder and chmod 700 it
-* Modify the executable paths and configuration as necessary
-* Then you can do:
-
-
 ## Hardware
 
 Highly recommended to use SSD! Minimum specs:
@@ -100,7 +91,6 @@ If you need to start over, you can run the uninstall script in this repo
 ```bash
 sudo ./delete_seednode_debian.sh
 ```
-
 WARNING: this script will delete all data!
 
 ## Running using docker (experimental)
