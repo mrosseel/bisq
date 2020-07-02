@@ -96,6 +96,7 @@ services:
             dockerfile: docker/prod/Dockerfile-nginx
         image: bisq/nginx
         container_name: nginx
+        restart: unless-stopped
         depends_on:
             - collectd
         expose:
