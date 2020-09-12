@@ -61,7 +61,6 @@ import com.google.common.util.concurrent.ListenableFuture;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
-import java.net.UnknownHostException;
 
 import java.nio.channels.FileLock;
 
@@ -482,18 +481,14 @@ public class WalletConfig extends AbstractIdleService {
     }
 
     void setPeerNodesForLocalHost() {
-        try {
-            setPeerNodes(new PeerAddress(InetAddress.getLocalHost(), params.getPort()));
-        } catch (UnknownHostException e) {
-            log.error(e.toString());
-            e.printStackTrace();
-            // Borked machine with no loopback adapter configured properly.
-            throw new RuntimeException(e);
-        }
+        setPeerNodes(new PeerAddress(InetAddress.getLoopbackAddress(), params.getPort()));
     }
 
-    private Wallet createOrLoadWallet(File walletFile, boolean shouldReplayWallet,
-                                      BisqKeyChainGroup keyChainGroup, boolean isBsqWallet, DeterministicSeed restoreFromSeed)
+    private Wallet createOrLoadWallet(File walletFile,
+                                      boolean shouldReplayWallet,
+                                      BisqKeyChainGroup keyChainGroup,
+                                      boolean isBsqWallet,
+                                      DeterministicSeed restoreFromSeed)
             throws Exception {
 
         if (restoreFromSeed != null)
@@ -530,7 +525,9 @@ public class WalletConfig extends AbstractIdleService {
         }
     }
 
-    private Wallet loadWallet(File walletFile, boolean shouldReplayWallet, boolean useBitcoinDeterministicKeyChain) throws Exception {
+    private Wallet loadWallet(File walletFile,
+                              boolean shouldReplayWallet,
+                              boolean useBitcoinDeterministicKeyChain) throws Exception {
         Wallet wallet;
         try (FileInputStream walletStream = new FileInputStream(walletFile)) {
             List<WalletExtension> extensions = provideWalletExtensions();
@@ -570,21 +567,30 @@ public class WalletConfig extends AbstractIdleService {
         // Runs in a separate thread.
         try {
             Context.propagate(context);
-            vPeerGroup.stop();
-            vBtcWallet.saveToFile(vBtcWalletFile);
-            if (vBsqWallet != null && vBsqWalletFile != null)
-                //noinspection ConstantConditions,ConstantConditions
-                vBsqWallet.saveToFile(vBsqWalletFile);
-            vStore.close();
 
-            vPeerGroup = null;
+            vBtcWallet.saveToFile(vBtcWalletFile);
             vBtcWallet = null;
-            vBsqWallet = null;
+            log.info("BtcWallet saved to file");
+
+            if (vBsqWallet != null && vBsqWalletFile != null) {
+                vBsqWallet.saveToFile(vBsqWalletFile);
+                vBsqWallet = null;
+                log.info("BsqWallet saved to file");
+            }
+
+            vStore.close();
             vStore = null;
+            log.info("SPV file closed");
+
             vChain = null;
+
+            // vPeerGroup.stop has no timeout and can take very long (10 sec. in my test). So we call it at the end.
+            // We might get likely interrupted by the parent call timeout.
+            vPeerGroup.stop();
+            vPeerGroup = null;
+            log.info("PeerGroup stopped");
         } catch (BlockStoreException e) {
             throw new IOException(e);
-        } catch (Throwable ignore) {
         }
     }
 

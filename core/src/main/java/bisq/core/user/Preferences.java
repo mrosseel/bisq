@@ -17,8 +17,8 @@
 
 package bisq.core.user;
 
-import bisq.core.btc.nodes.LocalBitcoinNode;
 import bisq.core.btc.nodes.BtcNodes;
+import bisq.core.btc.nodes.LocalBitcoinNode;
 import bisq.core.btc.wallet.Restrictions;
 import bisq.core.locale.Country;
 import bisq.core.locale.CountryUtil;
@@ -59,6 +59,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.stream.Collectors;
 
@@ -78,10 +79,14 @@ import static com.google.common.base.Preconditions.checkNotNull;
 public final class Preferences implements PersistedDataHost, BridgeAddressProvider {
 
     private static final ArrayList<BlockChainExplorer> BTC_MAIN_NET_EXPLORERS = new ArrayList<>(Arrays.asList(
+            new BlockChainExplorer("mempool.space (@wiz)", "https://mempool.space/tx/", "https://mempool.space/address/"),
+            new BlockChainExplorer("mempool.space Tor V3", "http://mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion/tx/", "http://mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion/address/"),
+            new BlockChainExplorer("mempool.emzy.de (@emzy)", "https://mempool.emzy.de/tx/", "https://mempool.emzy.de/address/"),
+            new BlockChainExplorer("mempool.emzy.de Tor V3", "http://mempool4t6mypeemozyterviq3i5de4kpoua65r3qkn5i3kknu5l2cad.onion/tx/", "http://mempool4t6mypeemozyterviq3i5de4kpoua65r3qkn5i3kknu5l2cad.onion/address/"),
+            new BlockChainExplorer("mempool.bisq.services (@devinbileck)", "https://mempool.bisq.services/tx/", "https://mempool.bisq.services/address/"),
+            new BlockChainExplorer("mempool.bisq.services Tor V3", "http://mempoolusb2f67qi7mz2it7n5e77a6komdzx6wftobcduxszkdfun2yd.onion/tx/", "http://mempoolusb2f67qi7mz2it7n5e77a6komdzx6wftobcduxszkdfun2yd.onion/address/"),
             new BlockChainExplorer("Blockstream.info", "https://blockstream.info/tx/", "https://blockstream.info/address/"),
             new BlockChainExplorer("Blockstream.info Tor V3", "http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion/tx/", "http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion/address/"),
-            new BlockChainExplorer("mempool.ninja", "https://mempool.ninja/tx/", "https://mempool.ninja/address/"),
-            new BlockChainExplorer("mempool.ninja Tor V2", "http://mempooltxrqf4re5.onion/tx/", "http://mempooltxrqf4re5.onion/address/"),
             new BlockChainExplorer("OXT", "https://oxt.me/transaction/", "https://oxt.me/address/"),
             new BlockChainExplorer("Bitaps", "https://bitaps.com/", "https://bitaps.com/"),
             new BlockChainExplorer("Blockcypher", "https://live.blockcypher.com/btc/tx/", "https://live.blockcypher.com/btc/address/"),
@@ -92,7 +97,8 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
             new BlockChainExplorer("Smartbit", "https://www.smartbit.com.au/tx/", "https://www.smartbit.com.au/address/"),
             new BlockChainExplorer("SoChain. Wow.", "https://chain.so/tx/BTC/", "https://chain.so/address/BTC/"),
             new BlockChainExplorer("Blockchain.info", "https://blockchain.info/tx/", "https://blockchain.info/address/"),
-            new BlockChainExplorer("Insight", "https://insight.bitpay.com/tx/", "https://insight.bitpay.com/address/")
+            new BlockChainExplorer("Insight", "https://insight.bitpay.com/tx/", "https://insight.bitpay.com/address/"),
+            new BlockChainExplorer("Blockchair", "https://blockchair.com/bitcoin/transaction/", "https://blockchair.com/bitcoin/address/")
     ));
     private static final ArrayList<BlockChainExplorer> BTC_TEST_NET_EXPLORERS = new ArrayList<>(Arrays.asList(
             new BlockChainExplorer("Blockstream.info", "https://blockstream.info/testnet/tx/", "https://blockstream.info/testnet/address/"),
@@ -101,20 +107,35 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
             new BlockChainExplorer("Blocktrail", "https://www.blocktrail.com/tBTC/tx/", "https://www.blocktrail.com/tBTC/address/"),
             new BlockChainExplorer("Biteasy", "https://www.biteasy.com/testnet/transactions/", "https://www.biteasy.com/testnet/addresses/"),
             new BlockChainExplorer("Smartbit", "https://testnet.smartbit.com.au/tx/", "https://testnet.smartbit.com.au/address/"),
-            new BlockChainExplorer("SoChain. Wow.", "https://chain.so/tx/BTCTEST/", "https://chain.so/address/BTCTEST/")
+            new BlockChainExplorer("SoChain. Wow.", "https://chain.so/tx/BTCTEST/", "https://chain.so/address/BTCTEST/"),
+            new BlockChainExplorer("Blockchair", "https://blockchair.com/bitcoin/testnet/transaction/", "https://blockchair.com/bitcoin/testnet/address/")
     ));
     private static final ArrayList<BlockChainExplorer> BTC_DAO_TEST_NET_EXPLORERS = new ArrayList<>(Collections.singletonList(
             new BlockChainExplorer("BTC DAO-testnet explorer", "https://bisq.network/explorer/btc/dao_testnet/tx/", "https://bisq.network/explorer/btc/dao_testnet/address/")
     ));
 
     public static final ArrayList<BlockChainExplorer> BSQ_MAIN_NET_EXPLORERS = new ArrayList<>(Arrays.asList(
-            new BlockChainExplorer("bsq.ninja (@wiz)", "https://bsq.ninja/tx.html?tx=", "https://bsq.ninja/Address.html?addr="),
-            new BlockChainExplorer("bsq.sqrrm.net (@sqrrm)", "https://bsq.sqrrm.net/tx.html?tx=", "https://bsq.sqrrm.net/Address.html?addr="),
-            new BlockChainExplorer("bsq.bisq.services (@devinbileck)", "https://bsq.bisq.services/tx.html?tx=", "https://bsq.bisq.services/Address.html?addr="),
+            new BlockChainExplorer("mempool.space (@wiz)", "https://mempool.space/bisq/tx/", "https://mempool.space/bisq/address/"),
+            new BlockChainExplorer("mempool.emzy.de (@emzy)", "https://mempool.emzy.de/bisq/tx/", "https://mempool.emzy.de/bisq/address/"),
+            new BlockChainExplorer("mempool.bisq.services (@devinbileck)", "https://mempool.bisq.services/bisq/tx/", "https://mempool.bisq.services/bisq/address/"),
             new BlockChainExplorer("bsq.vante.me (@mrosseel)", "https://bsq.vante.me/tx.html?tx=", "https://bsq.vante.me/Address.html?addr="),
-            new BlockChainExplorer("bsq.emzy.de (@emzy)", "https://bsq.emzy.de/tx.html?tx=", "https://bsq.emzy.de/Address.html?addr="),
+            new BlockChainExplorer("bsq.sqrrm.net (@sqrrm)", "https://bsq.sqrrm.net/tx.html?tx=", "https://bsq.sqrrm.net/Address.html?addr="),
             new BlockChainExplorer("bsq.bisq.cc (@m52go)", "https://bsq.bisq.cc/tx.html?tx=", "https://bsq.bisq.cc/Address.html?addr=")
     ));
+
+    private static final ArrayList<String> XMR_TX_PROOF_SERVICES_CLEAR_NET = new ArrayList<>(Arrays.asList(
+            "xmrblocks.monero.emzy.de", // @emzy
+            "explorer.monero.wiz.biz", // @wiz
+            "xmrblocks.bisq.services" // @devinbileck
+    ));
+    private static final ArrayList<String> XMR_TX_PROOF_SERVICES = new ArrayList<>(Arrays.asList(
+            "monero3bec7m26vx6si6qo7q7imlaoz45ot5m2b5z2ppgoooo6jx2rqd.onion", // @emzy
+            "wizxmr4hbdxdszqm5rfyqvceyca5jq62ppvtuznasnk66wvhhvgm3uyd.onion", // @wiz
+            "devinxmrwu4jrfq2zmq5kqjpxb44hx7i7didebkwrtvmvygj4uuop2ad.onion" // @devinbileck
+    ));
+
+    public static final boolean USE_SYMMETRIC_SECURITY_DEPOSIT = true;
+
 
     // payload is initialized so the default values are available for Property initialization.
     @Setter
@@ -298,6 +319,14 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
             setUsePriceNotifications(true);
         }
 
+        if (prefPayload.getAutoConfirmSettingsList().isEmpty()) {
+            List<String> defaultXmrTxProofServices = getDefaultXmrTxProofServices();
+            AutoConfirmSettings.getDefault(defaultXmrTxProofServices, "XMR")
+                    .ifPresent(xmrAutoConfirmSettings -> {
+                        getAutoConfirmSettingsList().add(xmrAutoConfirmSettings);
+                    });
+        }
+
         // We set the capability in CoreNetworkCapabilities if the program argument is set.
         // If we have set it in the preferences view we handle it here.
         CoreNetworkCapabilities.maybeApplyDaoFullMode(config);
@@ -305,7 +334,6 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
         initialReadDone = true;
         persist();
     }
-
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // API
@@ -385,6 +413,40 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
     public void setTacAcceptedV120(boolean tacAccepted) {
         prefPayload.setTacAcceptedV120(tacAccepted);
         persist();
+    }
+
+    public Optional<AutoConfirmSettings> findAutoConfirmSettings(String currencyCode) {
+        return prefPayload.getAutoConfirmSettingsList().stream()
+                .filter(e -> e.getCurrencyCode().equals(currencyCode))
+                .findAny();
+    }
+
+    public void setAutoConfServiceAddresses(String currencyCode, List<String> serviceAddresses) {
+        findAutoConfirmSettings(currencyCode).ifPresent(e -> {
+            e.setServiceAddresses(serviceAddresses);
+            persist();
+        });
+    }
+
+    public void setAutoConfEnabled(String currencyCode, boolean enabled) {
+        findAutoConfirmSettings(currencyCode).ifPresent(e -> {
+            e.setEnabled(enabled);
+            persist();
+        });
+    }
+
+    public void setAutoConfRequiredConfirmations(String currencyCode, int requiredConfirmations) {
+        findAutoConfirmSettings(currencyCode).ifPresent(e -> {
+            e.setRequiredConfirmations(requiredConfirmations);
+            persist();
+        });
+    }
+
+    public void setAutoConfTradeLimit(String currencyCode, long tradeLimit) {
+        findAutoConfirmSettings(currencyCode).ifPresent(e -> {
+            e.setTradeLimit(tradeLimit);
+            persist();
+        });
     }
 
     private void persist() {
@@ -729,7 +791,9 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
         }
     }
 
-    public ArrayList<BlockChainExplorer> getBsqBlockChainExplorers() { return BSQ_MAIN_NET_EXPLORERS; }
+    public ArrayList<BlockChainExplorer> getBsqBlockChainExplorers() {
+        return BSQ_MAIN_NET_EXPLORERS;
+    }
 
     public boolean showAgain(String key) {
         return !prefPayload.getDontShowAgainMap().containsKey(key) || !prefPayload.getDontShowAgainMap().get(key);
@@ -813,6 +877,14 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
         }
     }
 
+    public List<String> getDefaultXmrTxProofServices() {
+        if (config.useLocalhostForP2P) {
+            return XMR_TX_PROOF_SERVICES_CLEAR_NET;
+        } else {
+            return XMR_TX_PROOF_SERVICES;
+        }
+    }
+
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Private
@@ -827,8 +899,7 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
     }
 
     private boolean blockExplorerExists(ArrayList<BlockChainExplorer> explorers,
-                                              BlockChainExplorer explorer)
-    {
+                                        BlockChainExplorer explorer) {
         if (explorer != null && explorers != null && explorers.size() > 0)
             for (int i = 0; i < explorers.size(); i++)
                 if (explorers.get(i).name.equals(explorer.name))
@@ -958,5 +1029,7 @@ public final class Preferences implements PersistedDataHost, BridgeAddressProvid
         int getBlockNotifyPort();
 
         void setTacAcceptedV120(boolean tacAccepted);
+
+        void setAutoConfirmSettings(AutoConfirmSettings autoConfirmSettings);
     }
 }

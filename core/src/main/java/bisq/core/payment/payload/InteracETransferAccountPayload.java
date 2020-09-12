@@ -39,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 @Setter
 @Getter
 @Slf4j
-public final class InteracETransferAccountPayload extends PaymentAccountPayload {
+public final class InteracETransferAccountPayload extends PaymentAccountPayload implements PayloadWithHolderName {
     private String email = "";
     private String holderName = "";
     private String question = "";
@@ -119,5 +119,10 @@ public final class InteracETransferAccountPayload extends PaymentAccountPayload 
         return super.getAgeWitnessInputData(ArrayUtils.addAll(email.getBytes(StandardCharsets.UTF_8),
                 ArrayUtils.addAll(question.getBytes(StandardCharsets.UTF_8),
                         answer.getBytes(StandardCharsets.UTF_8))));
+    }
+
+    @Override
+    public String getOwnerId() {
+        return holderName;
     }
 }

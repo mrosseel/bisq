@@ -83,8 +83,7 @@ public class PriceFeedService {
     private String currencyCode;
     private final StringProperty currencyCodeProperty = new SimpleStringProperty();
     private final IntegerProperty updateCounter = new SimpleIntegerProperty(0);
-    private long epochInSecondAtLastRequest;
-    private Map<String, Long> timeStampMap = new HashMap<>();
+    private long epochInMillisAtLastRequest;
     private long retryDelay = 1;
     private long requestTs;
     @Nullable
@@ -126,6 +125,10 @@ public class PriceFeedService {
         request(false);
     }
 
+    public boolean hasPrices() {
+        return !cache.isEmpty();
+    }
+
     public void requestPriceFeed(Consumer<Double> resultHandler, FaultHandler faultHandler) {
         this.priceConsumer = resultHandler;
         this.faultHandler = faultHandler;
@@ -156,7 +159,7 @@ public class PriceFeedService {
             // At applyPriceToConsumer we also check if price is not exceeding max. age for price data.
             boolean success = applyPriceToConsumer();
             if (success) {
-                final MarketPrice marketPrice = cache.get(currencyCode);
+                MarketPrice marketPrice = cache.get(currencyCode);
                 if (marketPrice != null)
                     log.debug("Received new {} from provider {} after {} sec.",
                             marketPrice,
@@ -280,24 +283,8 @@ public class PriceFeedService {
         return updateCounter;
     }
 
-    public Date getLastRequestTimeStampBtcAverage() {
-        return new Date(epochInSecondAtLastRequest);
-    }
-
-    public Date getLastRequestTimeStampPoloniex() {
-        Long ts = timeStampMap.get("btcAverageTs");
-        if (ts != null) {
-            return new Date(ts);
-        } else
-            return new Date();
-    }
-
-    public Date getLastRequestTimeStampCoinmarketcap() {
-        Long ts = timeStampMap.get("coinmarketcapTs");
-        if (ts != null) {
-            return new Date(ts);
-        } else
-            return new Date();
+    public Date getLastRequestTimeStamp() {
+        return new Date(epochInMillisAtLastRequest);
     }
 
     public void applyLatestBisqMarketPrice(Set<TradeStatistics2> tradeStatisticsSet) {
@@ -342,7 +329,7 @@ public class PriceFeedService {
         boolean result = false;
         String errorMessage = null;
         if (currencyCode != null) {
-            final String baseUrl = priceProvider.getBaseUrl();
+            String baseUrl = priceProvider.getBaseUrl();
             if (cache.containsKey(currencyCode)) {
                 try {
                     MarketPrice marketPrice = cache.get(currencyCode);
@@ -399,9 +386,12 @@ public class PriceFeedService {
             public void onSuccess(@Nullable Tuple2<Map<String, Long>, Map<String, MarketPrice>> result) {
                 UserThread.execute(() -> {
                     checkNotNull(result, "Result must not be null at requestAllPrices");
-                    timeStampMap = result.first;
-                    epochInSecondAtLastRequest = timeStampMap.get("btcAverageTs");
-                    final Map<String, MarketPrice> priceMap = result.second;
+                    // Each currency rate has a different timestamp, depending on when
+                    // the pricenode aggregate rate was calculated
+                    // However, the request timestamp is when the pricenode was queried
+                    epochInMillisAtLastRequest = System.currentTimeMillis();
+
+                    Map<String, MarketPrice> priceMap = result.second;
 
                     cache.putAll(priceMap);
 

@@ -57,13 +57,13 @@ configure(subprojects) {
         junitVersion = '4.12'
         jupiterVersion = '5.3.2'
         kotlinVersion = '1.3.41'
-        knowmXchangeVersion = '4.3.3'
+        knowmXchangeVersion = '4.4.2'
         langVersion = '3.8'
         logbackVersion = '1.1.11'
         loggingVersion = '1.2'
         lombokVersion = '1.18.2'
         mockitoVersion = '3.0.0'
-        netlayerVersion = '0.6.7'
+        netlayerVersion = '0.6.8'
         protobufVersion = '3.10.0'
         protocVersion = protobufVersion
         pushyVersion = '0.13.2'
@@ -98,7 +98,8 @@ configure([project(':cli'),
            project(':relay'),
            project(':seednode'),
            project(':statsnode'),
-           project(':pricenode')]) {
+           project(':pricenode'),
+           project(':apitest')]) {
 
     apply plugin: 'application'
 
@@ -141,6 +142,16 @@ configure([project(':cli'),
                 def script = file("${rootProject.projectDir}/bisq-$applicationName")
                 script.text = script.text.replace(
                     'DEFAULT_JVM_OPTS=""', 'DEFAULT_JVM_OPTS="-XX:MaxRAM=4g"')
+            }
+
+            if (applicationName == 'apitest') {
+                // Pass the logback config file as a system property to avoid chatty
+                // logback startup due to multiple logback.xml files in the classpath
+                // (:daemon & :cli).
+                def script = file("${rootProject.projectDir}/bisq-$applicationName")
+                script.text = script.text.replace(
+                    'DEFAULT_JVM_OPTS=""', 'DEFAULT_JVM_OPTS="' +
+                    '-Dlogback.configurationFile=apitest/build/resources/main/logback.xml"')
             }
 
             if (osdetector.os != 'windows')
@@ -270,6 +281,17 @@ configure(project(':p2p')) {
         testAnnotationProcessor "org.projectlombok:lombok:$lombokVersion"
         testCompile("org.mockito:mockito-core:$mockitoVersion")
     }
+
+    processResources.doFirst {
+        // Sanity check that Git LFS-managed data store files have actually been sync'd.
+        // If they have not, e.g. because Git LFS is not installed, they will be text files
+        // containing a sha256 hash of the remote object, indicating we should stop the
+        // build and inform the user how to fix the problem.
+        if (file('src/main/resources/ProposalStore_BTC_MAINNET').text.contains("oid sha256:"))
+            throw new GradleException("p2p data store files have not been synchronized. " +
+                "To fix this, ensure you have Git LFS installed and run `git lfs pull`. " +
+                "See docs/build.md for more information.")
+    }
 }
 
 
@@ -306,19 +328,6 @@ configure(project(':core')) {
             exclude(module: 'jackson-annotations')
         }
         implementation "com.google.protobuf:protobuf-java:$protobufVersion"
-        implementation("io.grpc:grpc-protobuf:$grpcVersion") {
-            exclude(module: 'guava')
-            exclude(module: 'animal-sniffer-annotations')
-        }
-        implementation("io.grpc:grpc-stub:$grpcVersion") {
-            exclude(module: 'guava')
-            exclude(module: 'animal-sniffer-annotations')
-        }
-        compileOnly "javax.annotation:javax.annotation-api:$javaxAnnotationVersion"
-        runtimeOnly("io.grpc:grpc-netty-shaded:$grpcVersion") {
-            exclude(module: 'guava')
-            exclude(module: 'animal-sniffer-annotations')
-        }
         compileOnly "org.projectlombok:lombok:$lombokVersion"
         annotationProcessor "org.projectlombok:lombok:$lombokVersion"
 
@@ -335,7 +344,7 @@ configure(project(':core')) {
 }
 
 configure(project(':cli')) {
-    mainClassName = 'bisq.cli.app.BisqCliMain'
+    mainClassName = 'bisq.cli.CliMain'
 
     dependencies {
         compile project(':proto')
@@ -367,7 +376,7 @@ configure(project(':desktop')) {
     apply plugin: 'witness'
     apply from: '../gradle/witness/gradle-witness.gradle'
 
-    version = '1.3.1-SNAPSHOT'
+    version = '1.3.7'
 
     mainClassName = 'bisq.desktop.app.BisqAppMain'
 
@@ -447,17 +456,55 @@ configure(project(':pricenode')) {
 
     dependencies {
         compile project(":core")
+
+        compileOnly "org.projectlombok:lombok:$lombokVersion"
+        annotationProcessor "org.projectlombok:lombok:$lombokVersion"
+
         implementation "com.google.code.gson:gson:$gsonVersion"
         implementation "commons-codec:commons-codec:$codecVersion"
         implementation "org.apache.httpcomponents:httpcore:$httpcoreVersion"
         implementation("org.apache.httpcomponents:httpclient:$httpclientVersion") {
             exclude(module: 'commons-codec')
         }
-        compile("org.knowm.xchange:xchange-bitcoinaverage:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-bitbay:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-btcmarkets:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-binance:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-bitfinex:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-bitflyer:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-bitstamp:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-cexio:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-coinmate:$knowmXchangeVersion")
         compile("org.knowm.xchange:xchange-coinmarketcap:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-coinone:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-exmo:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-hitbtc:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-huobi:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-independentreserve:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-kraken:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-luno:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-mercadobitcoin:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-paribu:$knowmXchangeVersion")
         compile("org.knowm.xchange:xchange-poloniex:$knowmXchangeVersion")
+        compile("org.knowm.xchange:xchange-quoine:$knowmXchangeVersion")
         compile("org.springframework.boot:spring-boot-starter-web:$springBootVersion")
         compile("org.springframework.boot:spring-boot-starter-actuator")
+        testCompile "org.junit.jupiter:junit-jupiter-api:$jupiterVersion"
+        testCompile "org.junit.jupiter:junit-jupiter-params:$jupiterVersion"
+        testRuntime("org.junit.jupiter:junit-jupiter-engine:$jupiterVersion")
+        testCompileOnly "org.projectlombok:lombok:$lombokVersion"
+        testAnnotationProcessor "org.projectlombok:lombok:$lombokVersion"
+    }
+
+    test {
+        useJUnitPlatform()
+        
+        // Disabled by default, since spot provider tests include connections to external API endpoints
+        // Can be enabled by adding -Dtest.pricenode.includeSpotProviderTests=true to the gradle command:
+        // ./gradlew test -Dtest.pricenode.includeSpotProviderTests=true
+        if (System.properties['test.pricenode.includeSpotProviderTests'] != 'true') {
+            project.logger.lifecycle('Pricenode: Skipping spot provider tests')
+            exclude 'bisq/price/spot/providers/**'
+        }
     }
 
     task stage {
@@ -525,6 +572,10 @@ configure(project(':daemon')) {
             exclude(module: 'guava')
             exclude(module: 'animal-sniffer-annotations')
         }
+        runtimeOnly("io.grpc:grpc-netty-shaded:$grpcVersion") {
+            exclude(module: 'guava')
+            exclude(module: 'animal-sniffer-annotations')
+        }
         implementation "org.slf4j:slf4j-api:$slf4jVersion"
         implementation "ch.qos.logback:logback-core:$logbackVersion"
         implementation "ch.qos.logback:logback-classic:$logbackVersion"
@@ -533,3 +584,77 @@ configure(project(':daemon')) {
         annotationProcessor "org.projectlombok:lombok:$lombokVersion"
     }
 }
+
+configure(project(':apitest')) {
+    mainClassName = 'bisq.apitest.ApiTestMain'
+
+    // The external dao-setup.gradle file contains tasks to install and clean dao-setup
+    // files downloaded from
+    //          https://github.com/bisq-network/bisq/raw/master/docs/dao-setup.zip
+    // These tasks are not run by the default build, but they can can be run during
+    // full or partial builds, or by themselves.
+    // To run the regular clean + build + test (non api), and install dao-setup files:
+    //      ./gradlew clean build :apitest:installDaoSetup
+    // To install or re-install dao-setup file only:
+    //      ./gradlew :apitest:installDaoSetup -x test
+    // To clean installed dao-setup files:
+    //      ./gradlew :apitest:cleanDaoSetup -x test
+    apply from: 'dao-setup.gradle'
+
+    // We have to disable the :apitest 'test' task by default because we do not want
+    // to interfere with normal builds.  To run JUnit tests in this subproject:
+    // Run a normal build and install dao-setup files first, then run:
+    //              'gradle  :apitest:test -DrunApiTests=true'
+    test.enabled = System.getProperty("runApiTests") == "true"
+
+    sourceSets {
+        main {
+            resources {
+                exclude 'dao-setup'
+                exclude 'dao-setup.zip'
+            }
+        }
+    }
+
+    test {
+        useJUnitPlatform()
+        testLogging {
+            events "passed", "skipped", "failed"
+        }
+    }
+
+    dependencies {
+        compile project(':proto')
+        compile project(':common')
+        compile project(':seednode')
+        compile project(':desktop')
+        compile project(':daemon')
+        compile project(':cli')
+        implementation "net.sf.jopt-simple:jopt-simple:$joptVersion"
+        implementation "com.google.guava:guava:$guavaVersion"
+        implementation "com.google.protobuf:protobuf-java:$protobufVersion"
+        implementation("io.grpc:grpc-protobuf:$grpcVersion") {
+            exclude(module: 'guava')
+            exclude(module: 'animal-sniffer-annotations')
+        }
+        implementation("io.grpc:grpc-stub:$grpcVersion") {
+            exclude(module: 'guava')
+            exclude(module: 'animal-sniffer-annotations')
+        }
+        implementation "org.slf4j:slf4j-api:$slf4jVersion"
+        implementation "ch.qos.logback:logback-core:$logbackVersion"
+        implementation "ch.qos.logback:logback-classic:$logbackVersion"
+
+        compileOnly "org.projectlombok:lombok:$lombokVersion"
+        compileOnly "javax.annotation:javax.annotation-api:$javaxAnnotationVersion"
+        annotationProcessor "org.projectlombok:lombok:$lombokVersion"
+
+        testCompile "org.junit.jupiter:junit-jupiter-api:5.6.2"
+        testCompile "org.junit.jupiter:junit-jupiter-params:5.6.2"
+        testAnnotationProcessor "org.projectlombok:lombok:$lombokVersion"
+        testCompileOnly "org.projectlombok:lombok:$lombokVersion"
+        testRuntime "javax.annotation:javax.annotation-api:$javaxAnnotationVersion"
+        testRuntime("org.junit.jupiter:junit-jupiter-engine:5.6.2")
+    }
+}
+

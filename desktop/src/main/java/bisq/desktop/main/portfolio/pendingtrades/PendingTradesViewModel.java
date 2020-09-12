@@ -22,7 +22,6 @@ import bisq.desktop.common.model.ViewModel;
 import bisq.desktop.util.DisplayUtils;
 import bisq.desktop.util.GUIUtil;
 
-import bisq.core.account.witness.AccountAgeWitness;
 import bisq.core.account.witness.AccountAgeWitnessService;
 import bisq.core.btc.wallet.Restrictions;
 import bisq.core.locale.CurrencyUtil;
@@ -276,13 +275,7 @@ public class PendingTradesViewModel extends ActivatableWithDataModel<PendingTrad
             Offer offer = item.getTrade().getOffer();
             checkNotNull(offer);
             checkNotNull(offer.getPaymentMethod());
-            String method = Res.get(offer.getPaymentMethod().getId() + "_SHORT");
-            String methodCountryCode = offer.getCountryCode();
-
-            if (methodCountryCode != null)
-                result = method + " (" + methodCountryCode + ")";
-            else
-                result = method;
+            result = offer.getPaymentMethodNameWithCountryCode();
         }
         return result;
     }
@@ -370,28 +363,6 @@ public class PendingTradesViewModel extends ActivatableWithDataModel<PendingTrad
                 .size();
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////////
-    // AccountAgeWitness signing
-    ///////////////////////////////////////////////////////////////////////////////////////////
-
-
-    public boolean isSignWitnessTrade() {
-        checkNotNull(trade, "trade must not be null");
-        checkNotNull(trade.getOffer(), "offer must not be null");
-        AccountAgeWitness myWitness = accountAgeWitnessService.getMyWitness(dataModel.getSellersPaymentAccountPayload());
-
-        accountAgeWitnessService.witnessDebugLog(trade, myWitness);
-
-        return accountAgeWitnessService.accountIsSigner(myWitness) &&
-                !accountAgeWitnessService.peerHasSignedWitness(trade) &&
-                accountAgeWitnessService.tradeAmountIsSufficient(trade.getTradeAmount());
-    }
-
-    public void maybeSignWitness() {
-        if (isSignWitnessTrade()) {
-            accountAgeWitnessService.traderSignPeersAccountAgeWitness(trade);
-        }
-    }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // States

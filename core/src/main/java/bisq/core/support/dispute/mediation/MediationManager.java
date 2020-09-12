@@ -23,6 +23,7 @@ import bisq.core.btc.wallet.TradeWalletService;
 import bisq.core.locale.Res;
 import bisq.core.offer.OpenOffer;
 import bisq.core.offer.OpenOfferManager;
+import bisq.core.provider.price.PriceFeedService;
 import bisq.core.support.SupportType;
 import bisq.core.support.dispute.Dispute;
 import bisq.core.support.dispute.DisputeManager;
@@ -80,9 +81,10 @@ public final class MediationManager extends DisputeManager<MediationDisputeList>
                             ClosedTradableManager closedTradableManager,
                             OpenOfferManager openOfferManager,
                             PubKeyRing pubKeyRing,
-                            MediationDisputeListService mediationDisputeListService) {
+                            MediationDisputeListService mediationDisputeListService,
+                            PriceFeedService priceFeedService) {
         super(p2PService, tradeWalletService, walletService, walletsSetup, tradeManager, closedTradableManager,
-                openOfferManager, pubKeyRing, mediationDisputeListService);
+                openOfferManager, pubKeyRing, mediationDisputeListService, priceFeedService);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -187,11 +189,6 @@ public final class MediationManager extends DisputeManager<MediationDisputeList>
             log.warn("We got a dispute mail msg what we have already stored. TradeId = " + chatMessage.getTradeId());
         }
         dispute.setIsClosed(true);
-
-        if (dispute.disputeResultProperty().get() != null) {
-            log.warn("We got already a dispute result. That should only happen if a dispute needs to be closed " +
-                    "again because the first close did not succeed. TradeId = " + tradeId);
-        }
 
         dispute.setDisputeResult(disputeResult);
 

@@ -39,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 @Setter
 @Getter
 @Slf4j
-public final class USPostalMoneyOrderAccountPayload extends PaymentAccountPayload {
+public final class USPostalMoneyOrderAccountPayload extends PaymentAccountPayload implements PayloadWithHolderName {
     private String postalAddress = "";
     private String holderName = "";
 
@@ -106,5 +106,10 @@ public final class USPostalMoneyOrderAccountPayload extends PaymentAccountPayloa
         // We use here the holderName because the address alone seems to be too weak
         return super.getAgeWitnessInputData(ArrayUtils.addAll(holderName.getBytes(StandardCharsets.UTF_8),
                 postalAddress.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Override
+    public String getOwnerId() {
+        return holderName;
     }
 }

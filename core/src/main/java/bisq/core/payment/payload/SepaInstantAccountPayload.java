@@ -43,7 +43,7 @@ import lombok.extern.slf4j.Slf4j;
 @ToString
 @Getter
 @Slf4j
-public final class SepaInstantAccountPayload extends CountryBasedPaymentAccountPayload {
+public final class SepaInstantAccountPayload extends CountryBasedPaymentAccountPayload implements PayloadWithHolderName {
     @Setter
     private String holderName = "";
     @Setter
@@ -152,5 +152,10 @@ public final class SepaInstantAccountPayload extends CountryBasedPaymentAccountP
         // We don't add holderName because we don't want to break age validation if the user recreates an account with
         // slight changes in holder name (e.g. add or remove middle name)
         return super.getAgeWitnessInputData(ArrayUtils.addAll(iban.getBytes(StandardCharsets.UTF_8), bic.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Override
+    public String getOwnerId() {
+        return holderName;
     }
 }

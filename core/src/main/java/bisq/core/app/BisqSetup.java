@@ -31,7 +31,6 @@ import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.WalletsManager;
 import bisq.core.dao.DaoSetup;
-import bisq.core.dao.governance.asset.AssetService;
 import bisq.core.dao.governance.voteresult.VoteResultException;
 import bisq.core.dao.governance.voteresult.VoteResultService;
 import bisq.core.dao.state.unconfirmed.UnconfirmedBsqChangeOutputListService;
@@ -45,6 +44,7 @@ import bisq.core.notifications.alerts.market.MarketAlerts;
 import bisq.core.notifications.alerts.price.PriceAlert;
 import bisq.core.offer.OpenOfferManager;
 import bisq.core.payment.PaymentAccount;
+import bisq.core.payment.RevolutAccount;
 import bisq.core.payment.TradeLimits;
 import bisq.core.payment.payload.PaymentMethod;
 import bisq.core.provider.fee.FeeService;
@@ -58,8 +58,8 @@ import bisq.core.support.dispute.refund.refundagent.RefundAgentManager;
 import bisq.core.support.traderchat.TraderChatManager;
 import bisq.core.trade.TradeManager;
 import bisq.core.trade.TradeTxException;
-import bisq.core.trade.statistics.AssetTradeActivityCheck;
 import bisq.core.trade.statistics.TradeStatisticsManager;
+import bisq.core.trade.txproof.xmr.XmrTxProofService;
 import bisq.core.user.Preferences;
 import bisq.core.user.User;
 import bisq.core.util.FormattingUtils;
@@ -81,6 +81,7 @@ import bisq.common.crypto.CryptoException;
 import bisq.common.crypto.KeyRing;
 import bisq.common.crypto.SealedAndSigned;
 import bisq.common.proto.ProtobufferException;
+import bisq.common.util.InvalidVersionException;
 import bisq.common.util.Utilities;
 
 import org.bitcoinj.core.Coin;
@@ -113,6 +114,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import ch.qos.logback.classic.Level;
 
@@ -167,6 +169,7 @@ public class BisqSetup {
     private final PrivateNotificationManager privateNotificationManager;
     private final FilterManager filterManager;
     private final TradeStatisticsManager tradeStatisticsManager;
+    private final XmrTxProofService xmrTxProofService;
     private final ClockWatcher clockWatcher;
     private final FeeService feeService;
     private final DaoSetup daoSetup;
@@ -183,8 +186,6 @@ public class BisqSetup {
     private final PriceAlert priceAlert;
     private final MarketAlerts marketAlerts;
     private final VoteResultService voteResultService;
-    private final AssetTradeActivityCheck tradeActivityCheck;
-    private final AssetService assetService;
     private final TorSetup torSetup;
     private final TradeLimits tradeLimits;
     private final CoinFormatter formatter;
@@ -225,6 +226,12 @@ public class BisqSetup {
     @Setter
     @Nullable
     private Runnable showPopupIfInvalidBtcConfigHandler;
+    @Setter
+    @Nullable
+    private Consumer<List<RevolutAccount>> revolutAccountsUpdateHandler;
+    @Setter
+    @Nullable
+    private Runnable osxKeyLoggerWarningHandler;
 
     @Getter
     final BooleanProperty newVersionAvailableProperty = new SimpleBooleanProperty(false);
@@ -259,6 +266,7 @@ public class BisqSetup {
                      PrivateNotificationManager privateNotificationManager,
                      FilterManager filterManager,
                      TradeStatisticsManager tradeStatisticsManager,
+                     XmrTxProofService xmrTxProofService,
                      ClockWatcher clockWatcher,
                      FeeService feeService,
                      DaoSetup daoSetup,
@@ -275,8 +283,6 @@ public class BisqSetup {
                      PriceAlert priceAlert,
                      MarketAlerts marketAlerts,
                      VoteResultService voteResultService,
-                     AssetTradeActivityCheck tradeActivityCheck,
-                     AssetService assetService,
                      TorSetup torSetup,
                      TradeLimits tradeLimits,
                      @Named(FormattingUtils.BTC_FORMATTER_KEY) CoinFormatter formatter,
@@ -306,6 +312,7 @@ public class BisqSetup {
         this.privateNotificationManager = privateNotificationManager;
         this.filterManager = filterManager;
         this.tradeStatisticsManager = tradeStatisticsManager;
+        this.xmrTxProofService = xmrTxProofService;
         this.clockWatcher = clockWatcher;
         this.feeService = feeService;
         this.daoSetup = daoSetup;
@@ -322,8 +329,6 @@ public class BisqSetup {
         this.priceAlert = priceAlert;
         this.marketAlerts = marketAlerts;
         this.voteResultService = voteResultService;
-        this.tradeActivityCheck = tradeActivityCheck;
-        this.assetService = assetService;
         this.torSetup = torSetup;
         this.tradeLimits = tradeLimits;
         this.formatter = formatter;
@@ -351,6 +356,7 @@ public class BisqSetup {
         readMapsFromResources(this::step3);
         checkCryptoSetup();
         checkForCorrectOSArchitecture();
+        checkOSXVersion();
     }
 
     private void step3() {
@@ -659,6 +665,19 @@ public class BisqSetup {
         }
     }
 
+    private void checkOSXVersion() {
+        if (Utilities.isOSX() && osxKeyLoggerWarningHandler != null) {
+            try {
+                // Seems it was introduced at 10.14: https://github.com/wesnoth/wesnoth/issues/4109
+                if (Utilities.getMajorVersion() >= 10 && Utilities.getMinorVersion() >= 14) {
+                    osxKeyLoggerWarningHandler.run();
+                }
+            } catch (InvalidVersionException | NumberFormatException e) {
+                log.warn(e.getMessage());
+            }
+        }
+    }
+
     private void initDomainServices() {
         log.info("initDomainServices");
 
@@ -672,6 +691,7 @@ public class BisqSetup {
         traderChatManager.onAllServicesInitialized();
 
         tradeManager.onAllServicesInitialized();
+        xmrTxProofService.onAllServicesInitialized();
 
         if (walletsSetup.downloadPercentageProperty().get() == 1) {
             checkForLockedUpFunds();
@@ -784,9 +804,6 @@ public class BisqSetup {
         }
 
         tradeStatisticsManager.onAllServicesInitialized();
-        tradeActivityCheck.onAllServicesInitialized();
-
-        assetService.onAllServicesInitialized();
 
         accountAgeWitnessService.onAllServicesInitialized();
         signedWitnessService.onAllServicesInitialized();
@@ -797,13 +814,13 @@ public class BisqSetup {
         filterManager.addListener(filter -> {
             if (filter != null && filterWarningHandler != null) {
                 if (filter.getSeedNodes() != null && !filter.getSeedNodes().isEmpty()) {
-                    log.warn(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.seed")));
+                    log.info(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.seed")));
                     // Let's keep that more silent. Might be used in case a node is unstable and we don't want to confuse users.
                     // filterWarningHandler.accept(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.seed")));
                 }
 
                 if (filter.getPriceRelayNodes() != null && !filter.getPriceRelayNodes().isEmpty()) {
-                    log.warn(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.priceRelay")));
+                    log.info(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.priceRelay")));
                     // Let's keep that more silent. Might be used in case a node is unstable and we don't want to confuse users.
                     // filterWarningHandler.accept(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.priceRelay")));
                 }
@@ -834,6 +851,14 @@ public class BisqSetup {
         disputeMsgEvents.onAllServicesInitialized();
         priceAlert.onAllServicesInitialized();
         marketAlerts.onAllServicesInitialized();
+
+        if (revolutAccountsUpdateHandler != null) {
+            revolutAccountsUpdateHandler.accept(user.getPaymentAccountsAsObservable().stream()
+                    .filter(paymentAccount -> paymentAccount instanceof RevolutAccount)
+                    .map(paymentAccount -> (RevolutAccount) paymentAccount)
+                    .filter(RevolutAccount::userNameNotSet)
+                    .collect(Collectors.toList()));
+        }
 
         allBasicServicesInitialized = true;
     }

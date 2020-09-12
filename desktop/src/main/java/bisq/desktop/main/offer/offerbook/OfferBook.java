@@ -85,7 +85,7 @@ public class OfferBook {
                             .filter(item -> item.getOffer().getId().equals(offer.getId()))
                             .findAny();
                     if (candidateWithSameId.isPresent()) {
-                        log.warn("We had an old offer in the list with the same Offer ID. Might be that the state or errorMessage was different. " +
+                        log.warn("We had an old offer in the list with the same Offer ID. We remove the old one. " +
                                 "old offerBookListItem={}, new offerBookListItem={}", candidateWithSameId.get(), offerBookListItem);
                         offerBookListItems.remove(candidateWithSameId.get());
                     }
@@ -98,18 +98,22 @@ public class OfferBook {
 
             @Override
             public void onRemoved(Offer offer) {
-                // Update state in case that that offer is used in the take offer screen, so it gets updated correctly
-                offer.setState(Offer.State.REMOVED);
-
-                // clean up possible references in openOfferManager
-                tradeManager.onOfferRemovedFromRemoteOfferBook(offer);
-                // We don't use the contains method as the equals method in Offer takes state and errorMessage into account.
-                Optional<OfferBookListItem> candidateToRemove = offerBookListItems.stream()
-                        .filter(item -> item.getOffer().getId().equals(offer.getId()))
-                        .findAny();
-                candidateToRemove.ifPresent(offerBookListItems::remove);
+                removeOffer(offer, tradeManager);
             }
         });
+    }
+
+    public void removeOffer(Offer offer, TradeManager tradeManager) {
+        // Update state in case that that offer is used in the take offer screen, so it gets updated correctly
+        offer.setState(Offer.State.REMOVED);
+
+        // clean up possible references in openOfferManager
+        tradeManager.onOfferRemovedFromRemoteOfferBook(offer);
+        // We don't use the contains method as the equals method in Offer takes state and errorMessage into account.
+        Optional<OfferBookListItem> candidateToRemove = offerBookListItems.stream()
+                .filter(item -> item.getOffer().getId().equals(offer.getId()))
+                .findAny();
+        candidateToRemove.ifPresent(offerBookListItems::remove);
     }
 
     public ObservableList<OfferBookListItem> getOfferBookListItems() {

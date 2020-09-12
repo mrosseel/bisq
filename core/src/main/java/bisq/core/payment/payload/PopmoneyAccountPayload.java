@@ -37,7 +37,7 @@ import lombok.extern.slf4j.Slf4j;
 @Setter
 @Getter
 @Slf4j
-public final class PopmoneyAccountPayload extends PaymentAccountPayload {
+public final class PopmoneyAccountPayload extends PaymentAccountPayload implements PayloadWithHolderName {
     private String accountId = "";
     private String holderName = "";
 
@@ -102,5 +102,10 @@ public final class PopmoneyAccountPayload extends PaymentAccountPayload {
     @Override
     public byte[] getAgeWitnessInputData() {
         return super.getAgeWitnessInputData(accountId.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public String getOwnerId() {
+        return holderName;
     }
 }

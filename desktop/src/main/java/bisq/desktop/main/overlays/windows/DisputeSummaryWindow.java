@@ -113,7 +113,10 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
             buyerGetsAllRadioButton, sellerGetsAllRadioButton, customRadioButton;
     private RadioButton reasonWasBugRadioButton, reasonWasUsabilityIssueRadioButton,
             reasonProtocolViolationRadioButton, reasonNoReplyRadioButton, reasonWasScamRadioButton,
-            reasonWasOtherRadioButton, reasonWasBankRadioButton;
+            reasonWasOtherRadioButton, reasonWasBankRadioButton, reasonWasOptionTradeRadioButton,
+            reasonWasSellerNotRespondingRadioButton, reasonWasWrongSenderAccountRadioButton,
+            reasonWasPeerWasLateRadioButton, reasonWasTradeAlreadySettledRadioButton;
+
     // Dispute object of other trade peer. The dispute field is the one from which we opened the close dispute window.
     private Optional<Dispute> peersDisputeOptional;
     private String role;
@@ -155,7 +158,7 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
         this.dispute = dispute;
 
         rowIndex = -1;
-        width = 700;
+        width = 1150;
         createGridPane();
         addContent();
         display();
@@ -209,7 +212,7 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
         gridPane.setPadding(new Insets(35, 40, 30, 40));
         gridPane.getStyleClass().add("grid-pane");
         gridPane.getColumnConstraints().get(0).setHalignment(HPos.LEFT);
-        gridPane.setPrefWidth(900);
+        gridPane.setPrefWidth(width);
     }
 
     private void addContent() {
@@ -258,6 +261,11 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
             reasonWasScamRadioButton.setDisable(true);
             reasonWasOtherRadioButton.setDisable(true);
             reasonWasBankRadioButton.setDisable(true);
+            reasonWasOptionTradeRadioButton.setDisable(true);
+            reasonWasSellerNotRespondingRadioButton.setDisable(true);
+            reasonWasWrongSenderAccountRadioButton.setDisable(true);
+            reasonWasPeerWasLateRadioButton.setDisable(true);
+            reasonWasTradeAlreadySettledRadioButton.setDisable(true);
 
             isLoserPublisherCheckBox.setDisable(true);
             isLoserPublisherCheckBox.setSelected(peersDisputeResult.isLoserPublisher());
@@ -478,19 +486,34 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
     }
 
     private void addReasonControls() {
-        reasonWasBugRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.bug"));
-        reasonWasUsabilityIssueRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.usability"));
-        reasonProtocolViolationRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.protocolViolation"));
-        reasonNoReplyRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.noReply"));
-        reasonWasScamRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.scam"));
-        reasonWasBankRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.bank"));
-        reasonWasOtherRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason.other"));
+        reasonWasBugRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.BUG.name()));
+        reasonWasUsabilityIssueRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.USABILITY.name()));
+        reasonProtocolViolationRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.PROTOCOL_VIOLATION.name()));
+        reasonNoReplyRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.NO_REPLY.name()));
+        reasonWasScamRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.SCAM.name()));
+        reasonWasBankRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.BANK_PROBLEMS.name()));
+        reasonWasOtherRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.OTHER.name()));
+        reasonWasOptionTradeRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.OPTION_TRADE.name()));
+        reasonWasSellerNotRespondingRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.SELLER_NOT_RESPONDING.name()));
+        reasonWasWrongSenderAccountRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.WRONG_SENDER_ACCOUNT.name()));
+        reasonWasPeerWasLateRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.PEER_WAS_LATE.name()));
+        reasonWasTradeAlreadySettledRadioButton = new AutoTooltipRadioButton(Res.get("disputeSummaryWindow.reason." + DisputeResult.Reason.TRADE_ALREADY_SETTLED.name()));
 
         HBox feeRadioButtonPane = new HBox();
         feeRadioButtonPane.setSpacing(20);
-        feeRadioButtonPane.getChildren().addAll(reasonWasBugRadioButton, reasonWasUsabilityIssueRadioButton,
-                reasonProtocolViolationRadioButton, reasonNoReplyRadioButton,
-                reasonWasBankRadioButton, reasonWasScamRadioButton, reasonWasOtherRadioButton);
+        // We don't show no reply and protocol violation as those should be covered by more specific ones. We still leave
+        // the code to enable it if it turns out it is still requested by mediators.
+        feeRadioButtonPane.getChildren().addAll(
+                reasonWasTradeAlreadySettledRadioButton,
+                reasonWasPeerWasLateRadioButton,
+                reasonWasOptionTradeRadioButton,
+                reasonWasSellerNotRespondingRadioButton,
+                reasonWasWrongSenderAccountRadioButton,
+                reasonWasBugRadioButton,
+                reasonWasUsabilityIssueRadioButton,
+                reasonWasBankRadioButton,
+                reasonWasOtherRadioButton
+        );
 
         VBox vBox = addTopLabelWithVBox(gridPane, ++rowIndex,
                 Res.get("disputeSummaryWindow.reason"),
@@ -505,22 +528,38 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
         reasonWasScamRadioButton.setToggleGroup(reasonToggleGroup);
         reasonWasOtherRadioButton.setToggleGroup(reasonToggleGroup);
         reasonWasBankRadioButton.setToggleGroup(reasonToggleGroup);
+        reasonWasOptionTradeRadioButton.setToggleGroup(reasonToggleGroup);
+        reasonWasSellerNotRespondingRadioButton.setToggleGroup(reasonToggleGroup);
+        reasonWasWrongSenderAccountRadioButton.setToggleGroup(reasonToggleGroup);
+        reasonWasPeerWasLateRadioButton.setToggleGroup(reasonToggleGroup);
+        reasonWasTradeAlreadySettledRadioButton.setToggleGroup(reasonToggleGroup);
 
         reasonToggleSelectionListener = (observable, oldValue, newValue) -> {
-            if (newValue == reasonWasBugRadioButton)
+            if (newValue == reasonWasBugRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.BUG);
-            else if (newValue == reasonWasUsabilityIssueRadioButton)
+            } else if (newValue == reasonWasUsabilityIssueRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.USABILITY);
-            else if (newValue == reasonProtocolViolationRadioButton)
+            } else if (newValue == reasonProtocolViolationRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.PROTOCOL_VIOLATION);
-            else if (newValue == reasonNoReplyRadioButton)
+            } else if (newValue == reasonNoReplyRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.NO_REPLY);
-            else if (newValue == reasonWasScamRadioButton)
+            } else if (newValue == reasonWasScamRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.SCAM);
-            else if (newValue == reasonWasBankRadioButton)
+            } else if (newValue == reasonWasBankRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.BANK_PROBLEMS);
-            else if (newValue == reasonWasOtherRadioButton)
+            } else if (newValue == reasonWasOtherRadioButton) {
                 disputeResult.setReason(DisputeResult.Reason.OTHER);
+            } else if (newValue == reasonWasOptionTradeRadioButton) {
+                disputeResult.setReason(DisputeResult.Reason.OPTION_TRADE);
+            } else if (newValue == reasonWasSellerNotRespondingRadioButton) {
+                disputeResult.setReason(DisputeResult.Reason.SELLER_NOT_RESPONDING);
+            } else if (newValue == reasonWasWrongSenderAccountRadioButton) {
+                disputeResult.setReason(DisputeResult.Reason.WRONG_SENDER_ACCOUNT);
+            } else if (newValue == reasonWasTradeAlreadySettledRadioButton) {
+                disputeResult.setReason(DisputeResult.Reason.TRADE_ALREADY_SETTLED);
+            } else if (newValue == reasonWasPeerWasLateRadioButton) {
+                disputeResult.setReason(DisputeResult.Reason.PEER_WAS_LATE);
+            }
         };
         reasonToggleGroup.selectedToggleProperty().addListener(reasonToggleSelectionListener);
     }
@@ -548,6 +587,21 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
                     break;
                 case OTHER:
                     reasonToggleGroup.selectToggle(reasonWasOtherRadioButton);
+                    break;
+                case OPTION_TRADE:
+                    reasonToggleGroup.selectToggle(reasonWasOptionTradeRadioButton);
+                    break;
+                case SELLER_NOT_RESPONDING:
+                    reasonToggleGroup.selectToggle(reasonWasSellerNotRespondingRadioButton);
+                    break;
+                case WRONG_SENDER_ACCOUNT:
+                    reasonToggleGroup.selectToggle(reasonWasWrongSenderAccountRadioButton);
+                    break;
+                case PEER_WAS_LATE:
+                    reasonToggleGroup.selectToggle(reasonWasPeerWasLateRadioButton);
+                    break;
+                case TRADE_ALREADY_SETTLED:
+                    reasonToggleGroup.selectToggle(reasonWasTradeAlreadySettledRadioButton);
                     break;
             }
         }
@@ -691,11 +745,19 @@ public class DisputeSummaryWindow extends Overlay<DisputeSummaryWindow> {
         disputeResult.setCloseDate(new Date());
         dispute.setDisputeResult(disputeResult);
         dispute.setIsClosed(true);
+        DisputeResult.Reason reason = disputeResult.getReason();
         String text = Res.get("disputeSummaryWindow.close.msg",
                 DisplayUtils.formatDateTime(disputeResult.getCloseDate()),
                 formatter.formatCoinWithCode(disputeResult.getBuyerPayoutAmount()),
                 formatter.formatCoinWithCode(disputeResult.getSellerPayoutAmount()),
+                Res.get("disputeSummaryWindow.reason." + reason.name()),
                 disputeResult.summaryNotesProperty().get());
+
+        if (reason == DisputeResult.Reason.OPTION_TRADE &&
+                dispute.getChatMessages().size() > 1 &&
+                dispute.getChatMessages().get(1).isSystemMessage()) {
+            text += "\n\n" + dispute.getChatMessages().get(1).getMessage();
+        }
 
         if (dispute.getSupportType() == SupportType.MEDIATION) {
             text += Res.get("disputeSummaryWindow.close.nextStepsForMediation");

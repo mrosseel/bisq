@@ -52,9 +52,7 @@ import static bisq.core.btc.wallet.Restrictions.getDefaultBuyerSecurityDepositAs
 public final class PreferencesPayload implements UserThreadMappedPersistableEnvelope {
     private String userLanguage;
     private Country userCountry;
-    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     private List<FiatCurrency> fiatCurrencies = new ArrayList<>();
-    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     private List<CryptoCurrency> cryptoCurrencies = new ArrayList<>();
     private BlockChainExplorer blockChainExplorerMainNet;
     private BlockChainExplorer blockChainExplorerTestNet;
@@ -127,6 +125,9 @@ public final class PreferencesPayload implements UserThreadMappedPersistableEnve
     private int blockNotifyPort;
     private boolean tacAcceptedV120;
 
+    // Added at 1.3.8
+    private List<AutoConfirmSettings> autoConfirmSettingsList = new ArrayList<>();
+
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Constructor
@@ -186,7 +187,11 @@ public final class PreferencesPayload implements UserThreadMappedPersistableEnve
                 .setIgnoreDustThreshold(ignoreDustThreshold)
                 .setBuyerSecurityDepositAsPercentForCrypto(buyerSecurityDepositAsPercentForCrypto)
                 .setBlockNotifyPort(blockNotifyPort)
-                .setTacAcceptedV120(tacAcceptedV120);
+                .setTacAcceptedV120(tacAcceptedV120)
+                .addAllAutoConfirmSettings(autoConfirmSettingsList.stream()
+                    .map(autoConfirmSettings -> ((protobuf.AutoConfirmSettings) autoConfirmSettings.toProtoMessage()))
+                    .collect(Collectors.toList()));
+
         Optional.ofNullable(backupDirectory).ifPresent(builder::setBackupDirectory);
         Optional.ofNullable(preferredTradeCurrency).ifPresent(e -> builder.setPreferredTradeCurrency((protobuf.TradeCurrency) e.toProtoMessage()));
         Optional.ofNullable(offerBookChartScreenCurrencyCode).ifPresent(builder::setOfferBookChartScreenCurrencyCode);
@@ -274,6 +279,11 @@ public final class PreferencesPayload implements UserThreadMappedPersistableEnve
                 proto.getIgnoreDustThreshold(),
                 proto.getBuyerSecurityDepositAsPercentForCrypto(),
                 proto.getBlockNotifyPort(),
-                proto.getTacAcceptedV120());
+                proto.getTacAcceptedV120(),
+                proto.getAutoConfirmSettingsList().isEmpty() ? new ArrayList<>() :
+                        new ArrayList<>(proto.getAutoConfirmSettingsList().stream()
+                                .map(AutoConfirmSettings::fromProto)
+                                .collect(Collectors.toList()))
+        );
     }
 }

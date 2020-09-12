@@ -18,7 +18,6 @@
 package bisq.core.btc.setup;
 
 import bisq.core.btc.exceptions.InvalidHostException;
-import bisq.core.btc.nodes.LocalBitcoinNode;
 import bisq.core.btc.exceptions.RejectedTxException;
 import bisq.core.btc.model.AddressEntry;
 import bisq.core.btc.model.AddressEntryList;
@@ -27,6 +26,7 @@ import bisq.core.btc.nodes.BtcNodes;
 import bisq.core.btc.nodes.BtcNodes.BtcNode;
 import bisq.core.btc.nodes.BtcNodesRepository;
 import bisq.core.btc.nodes.BtcNodesSetupPreferences;
+import bisq.core.btc.nodes.LocalBitcoinNode;
 import bisq.core.user.Preferences;
 
 import bisq.network.Socks5MultiDiscovery;
@@ -59,7 +59,6 @@ import javax.inject.Inject;
 import javax.inject.Named;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Service;
 
 import org.apache.commons.lang3.StringUtils;
@@ -314,14 +313,16 @@ public class WalletsSetup {
     public void shutDown() {
         if (walletConfig != null) {
             try {
+                log.info("walletConfig shutDown started");
                 walletConfig.stopAsync();
-                walletConfig.awaitTerminated(5, TimeUnit.SECONDS);
+                walletConfig.awaitTerminated(1, TimeUnit.SECONDS);
+                log.info("walletConfig shutDown completed");
             } catch (Throwable ignore) {
+                log.info("walletConfig shutDown interrupted by timeout");
             }
-            shutDownComplete.set(true);
-        } else {
-            shutDownComplete.set(true);
         }
+
+        shutDownComplete.set(true);
     }
 
     public void reSyncSPVChain() throws IOException {
@@ -496,7 +497,7 @@ public class WalletsSetup {
     }
 
     public Set<Address> getAddressesByContext(@SuppressWarnings("SameParameterValue") AddressEntry.Context context) {
-        return ImmutableList.copyOf(addressEntryList.getList()).stream()
+        return addressEntryList.getAddressEntriesAsListImmutable().stream()
                 .filter(addressEntry -> addressEntry.getContext() == context)
                 .map(AddressEntry::getAddress)
                 .collect(Collectors.toSet());

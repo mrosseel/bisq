@@ -77,6 +77,7 @@ message NetworkEnvelope {
         PeerPublishedDelayedPayoutTxMessage peer_published_delayed_payout_tx_message = 49;
 
         RefreshTradeStateRequest refresh_trade_state_request = 50;
+        TraderSignedWitnessMessage trader_signed_witness_message = 51;
     }
 }
 
@@ -292,6 +293,7 @@ message CounterCurrencyTransferStartedMessage {
     bytes buyer_signature = 4;
     string counter_currency_tx_id = 5;
     string uid = 6;
+    string counter_currency_extra_data = 7;
 }
 
 message FinalizePayoutTxRequest {
@@ -327,6 +329,13 @@ message RefreshTradeStateRequest {
     string uid = 1;
     string trade_id = 2;
     NodeAddress sender_node_address = 3;
+}
+
+message TraderSignedWitnessMessage {
+    string uid = 1;
+    string trade_id = 2;
+    NodeAddress sender_node_address = 3;
+    SignedWitness signed_witness = 4;
 }
 
 // dispute
@@ -629,6 +638,11 @@ message Filter {
     repeated string mediators = 17;
     repeated string refundAgents = 18;
     repeated string bannedSignerPubKeys = 19;
+    repeated string btc_fee_receiver_addresses = 20;
+    int64 creation_date = 21;
+    string signer_pub_key_as_hex = 22;
+    repeated string bannedPrivilegedDevPubKeys = 23;
+    bool disable_auto_conf = 24;
 }
 
 // not used anymore from v0.6 on. But leave it for receiving TradeStatistics objects from older
@@ -801,6 +815,11 @@ message DisputeResult {
         PROTOCOL_VIOLATION = 5;
         NO_REPLY = 6;
         BANK_PROBLEMS = 7;
+        OPTION_TRADE = 8;
+        SELLER_NOT_RESPONDING = 9;
+        WRONG_SENDER_ACCOUNT = 10;
+        TRADE_ALREADY_SETTLED = 11;
+        PEER_WAS_LATE = 12;
     }
 
     string trade_id = 1;
@@ -1071,6 +1090,7 @@ message PopmoneyAccountPayload {
 
 message RevolutAccountPayload {
     string account_id = 1;
+    string user_name = 2;
 }
 
 message PerfectMoneyAccountPayload {
@@ -1115,7 +1135,7 @@ message PersistableEnvelope {
         NavigationPath navigation_path = 5;
 
         TradableList tradable_list = 6;
-        TradeStatisticsList trade_statistics_list = 7 [deprecated = true]; // Was used in pre v0.6.0 version. Not used anymore.
+        // TradeStatisticsList trade_statistics_list = 7; // Was used in pre v0.6.0 version. Not used anymore.
         ArbitrationDisputeList arbitration_dispute_list = 8;
 
         PreferencesPayload preferences_payload = 9;
@@ -1128,10 +1148,7 @@ message PersistableEnvelope {
         AccountAgeWitnessStore account_age_witness_store = 13;
         TradeStatistics2Store trade_statistics2_store = 14;
 
-        // we need to keep id 15 here otherwise the reading of the old data structure would not work anymore.
-        // can be removed after most people have updated as the reading of the PersistableNetworkPayloadList
-        // is not mandatory.
-        PersistableNetworkPayloadList persistable_network_payload_list = 15 [deprecated = true];
+        // PersistableNetworkPayloadList persistable_network_payload_list = 15; // long deprecated & migration away from it is already done
 
         ProposalStore proposal_store = 16;
         TempProposalStore temp_proposal_store = 17;
@@ -1140,7 +1157,7 @@ message PersistableEnvelope {
         BallotList ballot_list = 20;
         MyVoteList my_vote_list = 21;
         MyBlindVoteList my_blind_vote_list = 22;
-        MeritList merit_list = 23;
+        // MeritList merit_list = 23; // was not used here, but its class used to implement PersistableEnvelope via its super
         DaoStateStore dao_state_store = 24;
         MyReputationList my_reputation_list = 25;
         MyProofOfBurnList my_proof_of_burn_list = 26;
@@ -1176,11 +1193,6 @@ message MapValue {
 // deprecated. Not used anymore.
 message PersistedEntryMap {
     map<string, ProtectedStorageEntry> persisted_entry_map = 1;
-}
-
-// deprecated. Not used anymore.
-message PersistableNetworkPayloadList {
-    repeated PersistableNetworkPayload items = 1;
 }
 
 // We use a list not a hash map to save disc space. The hash can be calculated from the payload anyway
@@ -1237,11 +1249,6 @@ message PaymentAccountList {
 
 message TradableList {
     repeated Tradable tradable = 1;
-}
-
-// deprecated  Was used in pre v0.6.0 version. Not used anymore but leave it as it is used in PersistableEnvelope
-message TradeStatisticsList {
-    repeated TradeStatistics trade_statistics = 1;
 }
 
 message Offer {
@@ -1389,6 +1396,8 @@ message Trade {
     PubKeyRing refund_agent_pub_key_ring = 34;
     RefundResultState refund_result_state = 35;
     int64 last_refresh_request_date = 36;
+    string counter_currency_extra_data = 37;
+    string asset_tx_proof_result = 38; // name of AssetTxProofResult enum
 }
 
 message BuyerAsMakerTrade {
@@ -1549,6 +1558,15 @@ message PreferencesPayload {
     int32 block_notify_port = 53;
     int32 css_theme = 54;
     bool tac_accepted_v120 = 55;
+    repeated AutoConfirmSettings auto_confirm_settings = 56;
+}
+
+message AutoConfirmSettings {
+    bool enabled = 1;
+    int32 required_confirmations = 2;
+    int64 trade_limit = 3;
+    repeated string service_addresses = 4;
+    string currency_code = 5;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////

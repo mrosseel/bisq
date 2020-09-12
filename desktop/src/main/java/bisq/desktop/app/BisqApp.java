@@ -54,6 +54,8 @@ import com.google.inject.Injector;
 import com.google.inject.Key;
 import com.google.inject.name.Names;
 
+import com.google.common.base.Joiner;
+
 import javafx.application.Application;
 
 import javafx.stage.Modality;
@@ -69,6 +71,8 @@ import javafx.scene.layout.StackPane;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -169,7 +173,7 @@ public class BisqApp extends Application implements UncaughtExceptionHandler {
             if (scene == null) {
                 log.warn("Scene not available yet, we create a new scene. The bug might be caused by an exception in a constructor or by a circular dependency in Guice. throwable=" + throwable.toString());
                 scene = new Scene(new StackPane(), 1000, 650);
-                CssTheme.loadSceneStyles(scene, CssTheme.CSS_THEME_LIGHT);
+                CssTheme.loadSceneStyles(scene, CssTheme.CSS_THEME_LIGHT, false);
                 stage.setScene(scene);
                 stage.show();
             }
@@ -221,10 +225,11 @@ public class BisqApp extends Application implements UncaughtExceptionHandler {
         addSceneKeyEventHandler(scene, injector);
 
         Preferences preferences = injector.getInstance(Preferences.class);
+        var config = injector.getInstance(Config.class);
         preferences.getCssThemeProperty().addListener((ov) -> {
-            CssTheme.loadSceneStyles(scene, preferences.getCssTheme());
+            CssTheme.loadSceneStyles(scene, preferences.getCssTheme(), config.useDevModeHeader);
         });
-        CssTheme.loadSceneStyles(scene, preferences.getCssTheme());
+        CssTheme.loadSceneStyles(scene, preferences.getCssTheme(), config.useDevModeHeader);
 
         return scene;
     }
@@ -240,8 +245,19 @@ public class BisqApp extends Application implements UncaughtExceptionHandler {
 
         // configure the primary stage
         String appName = injector.getInstance(Key.get(String.class, Names.named(Config.APP_NAME)));
-        if (!Config.baseCurrencyNetwork().isMainnet())
-            appName += " [" + Res.get(Config.baseCurrencyNetwork().name()) + "]";
+        List<String> postFixes = new ArrayList<>();
+        if (!Config.baseCurrencyNetwork().isMainnet()) {
+            postFixes.add(Config.baseCurrencyNetwork().name());
+        }
+        if (injector.getInstance(Config.class).useLocalhostForP2P) {
+            postFixes.add("LOCALHOST");
+        }
+        if (injector.getInstance(Config.class).useDevMode) {
+            postFixes.add("DEV MODE");
+        }
+        if (!postFixes.isEmpty()) {
+            appName += " [" + Joiner.on(", ").join(postFixes) + " ]";
+        }
 
         stage.setTitle(appName);
         stage.setScene(scene);

@@ -32,7 +32,6 @@ import bisq.desktop.util.validation.RegexValidator;
 import bisq.core.account.witness.AccountAgeWitness;
 import bisq.core.account.witness.AccountAgeWitnessService;
 import bisq.core.btc.setup.WalletsSetup;
-import bisq.core.btc.wallet.WalletsManager;
 import bisq.core.locale.Country;
 import bisq.core.locale.CountryUtil;
 import bisq.core.locale.CurrencyUtil;
@@ -46,6 +45,7 @@ import bisq.core.payment.payload.PaymentMethod;
 import bisq.core.provider.fee.FeeService;
 import bisq.core.provider.price.MarketPrice;
 import bisq.core.provider.price.PriceFeedService;
+import bisq.core.trade.txproof.AssetTxProofResult;
 import bisq.core.user.DontShowAgainLookup;
 import bisq.core.user.Preferences;
 import bisq.core.user.User;
@@ -62,7 +62,6 @@ import bisq.common.config.Config;
 import bisq.common.proto.persistable.PersistableList;
 import bisq.common.proto.persistable.PersistenceProtoResolver;
 import bisq.common.storage.CorruptedDatabaseFilesHandler;
-import bisq.common.storage.FileUtil;
 import bisq.common.storage.Storage;
 import bisq.common.util.MathUtils;
 import bisq.common.util.Tuple2;
@@ -74,7 +73,6 @@ import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.uri.BitcoinURI;
 import org.bitcoinj.utils.Fiat;
-import org.bitcoinj.wallet.DeterministicSeed;
 
 import com.googlecode.jcsv.CSVStrategy;
 import com.googlecode.jcsv.writer.CSVEntryConverter;
@@ -142,6 +140,8 @@ import java.util.function.Consumer;
 import lombok.extern.slf4j.Slf4j;
 
 import org.jetbrains.annotations.NotNull;
+
+import javax.annotation.Nullable;
 
 import static bisq.desktop.util.FormBuilder.addTopLabelComboBoxComboBox;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -800,26 +800,6 @@ public class GUIUtil {
         }
     }
 
-    public static void restoreSeedWords(DeterministicSeed seed, WalletsManager walletsManager, File storageDir) {
-        try {
-            FileUtil.renameFile(new File(storageDir, "AddressEntryList"), new File(storageDir, "AddressEntryList_wallet_restore_" + System.currentTimeMillis()));
-        } catch (Throwable t) {
-            new Popup().error(Res.get("error.deleteAddressEntryListFailed", t)).show();
-        }
-        walletsManager.restoreSeedWords(
-                seed,
-                () -> UserThread.execute(() -> {
-                    log.info("Wallets restored with seed words");
-                    new Popup().feedback(Res.get("seed.restore.success")).hideCloseButton().show();
-                    BisqApp.getShutDownHandler().run();
-                }),
-                throwable -> UserThread.execute(() -> {
-                    log.error(throwable.toString());
-                    new Popup().error(Res.get("seed.restore.error", Res.get("shared.errorMessageInline", throwable)))
-                            .show();
-                }));
-    }
-
     public static void showSelectableTextModal(String title, String text) {
         TextArea textArea = new BisqTextArea();
         textArea.setText(text);
@@ -1129,6 +1109,7 @@ public class GUIUtil {
         RegexValidator regexValidator = new RegexValidator();
         String portRegexPattern = "(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])";
         String onionV2RegexPattern = String.format("[a-zA-Z2-7]{16}\\.onion(?:\\:%1$s)?", portRegexPattern);
+        String onionV3RegexPattern = String.format("[a-zA-Z2-7]{56}\\.onion(?:\\:%1$s)?", portRegexPattern);
         String ipv4RegexPattern = String.format("(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}" +
                 "(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" +
                 "(?:\\:%1$s)?", portRegexPattern);
@@ -1152,8 +1133,158 @@ public class GUIUtil {
                 ")";                                                   // (IPv4-Embedded IPv6 Address)
         ipv6RegexPattern = String.format("(?:%1$s)|(?:\\[%1$s\\]\\:%2$s)", ipv6RegexPattern, portRegexPattern);
         String fqdnRegexPattern = String.format("(((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\\.)+(?!onion)[a-zA-Z]{2,63}(?:\\:%1$s)?)", portRegexPattern);
-        regexValidator.setPattern(String.format("^(?:(?:(?:%1$s)|(?:%2$s)|(?:%3$s)|(?:%4$s)),)*(?:(?:%1$s)|(?:%2$s)|(?:%3$s)|(?:%4$s))*$",
-                onionV2RegexPattern, ipv4RegexPattern, ipv6RegexPattern, fqdnRegexPattern));
+        regexValidator.setPattern(String.format("^(?:(?:(?:%1$s)|(?:%2$s)|(?:%3$s)|(?:%4$s)|(?:%5$s)),\\s*)*(?:(?:%1$s)|(?:%2$s)|(?:%3$s)|(?:%4$s)|(?:%5$s))*$",
+                onionV2RegexPattern, onionV3RegexPattern, ipv4RegexPattern, ipv6RegexPattern, fqdnRegexPattern));
         return regexValidator;
+    }
+
+    // checks if valid tor onion hostname with optional port at the end
+    public static RegexValidator onionAddressRegexValidator() {
+        RegexValidator regexValidator = new RegexValidator();
+        String portRegexPattern = "(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])";
+        String onionV2RegexPattern = String.format("[a-zA-Z2-7]{16}\\.onion(?:\\:%1$s)?", portRegexPattern);
+        String onionV3RegexPattern = String.format("[a-zA-Z2-7]{56}\\.onion(?:\\:%1$s)?", portRegexPattern);
+        regexValidator.setPattern(String.format("^(?:(?:(?:%1$s)|(?:%2$s)),\\s*)*(?:(?:%1$s)|(?:%2$s))*$",
+                onionV2RegexPattern, onionV3RegexPattern));
+        return regexValidator;
+    }
+
+    // checks if localhost address, with optional port at the end
+    public static RegexValidator localhostAddressRegexValidator() {
+        RegexValidator regexValidator = new RegexValidator();
+
+        // match 0 ~ 65535
+        String portRegexPattern = "(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])";
+
+        // match 127/8 (127.0.0.0 ~ 127.255.255.255)
+        String localhostIpv4RegexPattern = String.format(
+                "(?:127\\.)" +
+                "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){2}" +
+                "(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" +
+                "(?:\\:%1$s)?",
+                portRegexPattern);
+
+        // match ::/64 with optional port at the end, i.e. ::1 or [::1]:8081
+        String localhostIpv6RegexPattern = "(:((:[0-9a-fA-F]{1,4}){1,4}|:)|)";
+        localhostIpv6RegexPattern = String.format("(?:%1$s)|(?:\\[%1$s\\]\\:%2$s)", localhostIpv6RegexPattern, portRegexPattern);
+
+        // match *.local
+        String localhostFqdnRegexPattern = String.format("(localhost(?:\\:%1$s)?)", portRegexPattern);
+
+        regexValidator.setPattern(String.format("^(?:(?:(?:%1$s)|(?:%2$s)|(?:%3$s)),\\s*)*(?:(?:%1$s)|(?:%2$s)|(?:%3$s))*$",
+                localhostIpv4RegexPattern, localhostIpv6RegexPattern, localhostFqdnRegexPattern));
+
+        return regexValidator;
+    }
+
+    // checks if local area network address, with optional port at the end
+    public static RegexValidator localnetAddressRegexValidator() {
+        RegexValidator regexValidator = new RegexValidator();
+
+        // match 0 ~ 65535
+        String portRegexPattern = "(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])";
+
+        // match 10/8 (10.0.0.0 ~ 10.255.255.255)
+        String localnetIpv4RegexPatternA = String.format(
+                "(?:10\\.)" +
+                "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){2}" +
+                "(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" +
+                "(?:\\:%1$s)?",
+                portRegexPattern);
+
+        // match 172.16/12 (172.16.0.0 ~ 172.31.255.255)
+        String localnetIpv4RegexPatternB = String.format(
+                "(?:172\\.)" +
+                "(?:(?:1[6-9]|2[0-9]|[3][0-1])\\.)" +
+                "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.)" +
+                "(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" +
+                "(?:\\:%1$s)?",
+                portRegexPattern);
+
+        // match 192.168/16 (192.168.0.0 ~ 192.168.255.255)
+        String localnetIpv4RegexPatternC = String.format(
+                "(?:192\\.)" +
+                "(?:168\\.)" +
+                "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.)" +
+                "(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" +
+                "(?:\\:%1$s)?",
+                portRegexPattern);
+
+        // match 169.254/15 (169.254.0.0 ~ 169.255.255.255)
+        String autolocalIpv4RegexPattern = String.format(
+                "(?:169\\.)" +
+                "(?:(?:254|255)\\.)" +
+                "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.)" +
+                "(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" +
+                "(?:\\:%1$s)?",
+                portRegexPattern);
+
+        // match fc00::/7  (fc00:: ~ fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff)
+        String localnetIpv6RegexPattern = "(" +
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|" +            // fd00:2:3:4:5:6:7:8
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,7}:|" +                         // fd00::                                 fd00:2:3:4:5:6:7::
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,6}:[0-9a-fA-F]{1,4}|" +         // fd00::8             fd00:2:3:4:5:6::8  fd00:2:3:4:5:6::8
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,5}(:[0-9a-fA-F]{1,4}){1,1}|" +  // fd00::7:8           fd00:2:3:4:5::7:8  fd00:2:3:4:5::8
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,4}(:[0-9a-fA-F]{1,4}){1,2}|" +  // fd00::7:8           fd00:2:3:4:5::7:8  fd00:2:3:4:5::8
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,3}(:[0-9a-fA-F]{1,4}){1,3}|" +  // fd00::6:7:8         fd00:2:3:4::6:7:8  fd00:2:3:4::8
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,2}(:[0-9a-fA-F]{1,4}){1,4}|" +  // fd00::5:6:7:8       fd00:2:3::5:6:7:8  fd00:2:3::8
+                "([fF][cCdD][0-9a-fA-F]{2}:)([0-9a-fA-F]{1,4}:){0,1}(:[0-9a-fA-F]{1,4}){1,5}|" +  // fd00::4:5:6:7:8     fd00:2::4:5:6:7:8  fd00:2::8
+                "([fF][cCdD][0-9a-fA-F]{2}:)(:[0-9a-fA-F]{1,4}){1,6}" +                           // fd00::3:4:5:6:7:8   fd00::3:4:5:6:7:8  fd00::8
+                ")";
+
+        // match fe80::/10 (fe80:: ~ febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff)
+        String autolocalIpv6RegexPattern = "(" +
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|" +            // fe80:2:3:4:5:6:7:8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,7}:|" +                         // fe80::                                 fe80:2:3:4:5:6:7::
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,6}:[0-9a-fA-F]{1,4}|" +         // fe80::8             fe80:2:3:4:5:6::8  fe80:2:3:4:5:6::8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,5}(:[0-9a-fA-F]{1,4}){1,1}|" +  // fe80::7:8           fe80:2:3:4:5::7:8  fe80:2:3:4:5::8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,4}(:[0-9a-fA-F]{1,4}){1,2}|" +  // fe80::7:8           fe80:2:3:4:5::7:8  fe80:2:3:4:5::8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,3}(:[0-9a-fA-F]{1,4}){1,3}|" +  // fe80::6:7:8         fe80:2:3:4::6:7:8  fe80:2:3:4::8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,2}(:[0-9a-fA-F]{1,4}){1,4}|" +  // fe80::5:6:7:8       fe80:2:3::5:6:7:8  fe80:2:3::8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)([0-9a-fA-F]{1,4}:){0,1}(:[0-9a-fA-F]{1,4}){1,5}|" +  // fe80::4:5:6:7:8     fe80:2::4:5:6:7:8  fe80:2::8
+                "([fF][eE][8-9a-bA-B][0-9a-fA-F]:)(:[0-9a-fA-F]{1,4}){1,6}" +                           // fe80::3:4:5:6:7:8   fe80::3:4:5:6:7:8  fe80::8
+                ")";
+
+        // allow for brackets with optional port at the end
+        localnetIpv6RegexPattern = String.format("(?:%1$s)|(?:\\[%1$s\\]\\:%2$s)", localnetIpv6RegexPattern, portRegexPattern);
+
+        // allow for brackets with optional port at the end
+        autolocalIpv6RegexPattern = String.format("(?:%1$s)|(?:\\[%1$s\\]\\:%2$s)", autolocalIpv6RegexPattern, portRegexPattern);
+
+        // match *.local
+        String localFqdnRegexPattern = String.format("(((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\\.)+local(?:\\:%1$s)?)", portRegexPattern);
+
+        regexValidator.setPattern(String.format("^(?:(?:(?:%1$s)|(?:%2$s)|(?:%3$s)|(?:%4$s)|(?:%5$s)|(?:%6$s)|(?:%7$s)),\\s*)*(?:(?:%1$s)|(?:%2$s)|(?:%3$s)|(?:%4$s)|(?:%5$s)|(?:%6$s)|(?:%7$s))*$",
+                localnetIpv4RegexPatternA, localnetIpv4RegexPatternB, localnetIpv4RegexPatternC, autolocalIpv4RegexPattern, localnetIpv6RegexPattern, autolocalIpv6RegexPattern, localFqdnRegexPattern));
+        return regexValidator;
+    }
+
+    public static String getProofResultAsString(@Nullable AssetTxProofResult result) {
+        if (result == null) {
+            return "";
+        }
+        String key = "portfolio.pending.autoConf.state." + result.name();
+        switch (result) {
+            case UNDEFINED:
+                return "";
+            case FEATURE_DISABLED:
+                return Res.get(key, result.getDetails());
+            case TRADE_LIMIT_EXCEEDED:
+                return Res.get(key);
+            case INVALID_DATA:
+                return Res.get(key, result.getDetails());
+            case PAYOUT_TX_ALREADY_PUBLISHED:
+            case DISPUTE_OPENED:
+            case REQUESTS_STARTED:
+                return Res.get(key);
+            case PENDING:
+                return Res.get(key, result.getNumSuccessResults(), result.getNumRequiredSuccessResults(), result.getDetails());
+            case COMPLETED:
+            case ERROR:
+            case FAILED:
+                return Res.get(key);
+            default:
+                return result.name();
+        }
     }
 }

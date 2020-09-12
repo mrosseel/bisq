@@ -42,7 +42,7 @@ import javax.annotation.Nullable;
 @Setter
 @Getter
 @Slf4j
-public class CashDepositAccountPayload extends CountryBasedPaymentAccountPayload {
+public class CashDepositAccountPayload extends CountryBasedPaymentAccountPayload implements PayloadWithHolderName {
     private String holderName = "";
     @Nullable
     private String holderEmail;
@@ -223,5 +223,10 @@ public class CashDepositAccountPayload extends CountryBasedPaymentAccountPayload
                 nationalAccountId;
 
         return super.getAgeWitnessInputData(all.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public String getOwnerId() {
+        return holderName;
     }
 }

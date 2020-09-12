@@ -37,7 +37,7 @@ import lombok.extern.slf4j.Slf4j;
 @Setter
 @Getter
 @Slf4j
-public final class ChaseQuickPayAccountPayload extends PaymentAccountPayload {
+public final class ChaseQuickPayAccountPayload extends PaymentAccountPayload implements PayloadWithHolderName {
     private String email = "";
     private String holderName = "";
 
@@ -105,5 +105,10 @@ public final class ChaseQuickPayAccountPayload extends PaymentAccountPayload {
         // We don't add holderName because we don't want to break age validation if the user recreates an account with
         // slight changes in holder name (e.g. add or remove middle name)
         return super.getAgeWitnessInputData(email.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public String getOwnerId() {
+        return holderName;
     }
 }

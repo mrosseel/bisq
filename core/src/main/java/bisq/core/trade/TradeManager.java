@@ -65,8 +65,6 @@ import bisq.common.handlers.ResultHandler;
 import bisq.common.proto.network.NetworkEnvelope;
 import bisq.common.proto.persistable.PersistedDataHost;
 import bisq.common.storage.Storage;
-import bisq.common.util.Tuple2;
-import bisq.common.util.Utilities;
 
 import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Coin;
@@ -93,7 +91,6 @@ import org.spongycastle.crypto.params.KeyParameter;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -129,6 +126,7 @@ public class TradeManager implements PersistedDataHost {
     private final TradeStatisticsManager tradeStatisticsManager;
     private final ReferralIdService referralIdService;
     private final AccountAgeWitnessService accountAgeWitnessService;
+    @Getter
     private final ArbitratorManager arbitratorManager;
     private final MediatorManager mediatorManager;
     private final RefundAgentManager refundAgentManager;
@@ -280,6 +278,7 @@ public class TradeManager implements PersistedDataHost {
     }
 
     public void shutDown() {
+        // Do nothing here
     }
 
     private void initPendingTrades() {
@@ -346,6 +345,16 @@ public class TradeManager implements PersistedDataHost {
         pendingTradesInitialized.set(true);
     }
 
+
+    public void onUserConfirmedFiatPaymentReceived(SellerTrade sellerTrade,
+                                                   ResultHandler resultHandler,
+                                                   ErrorMessageHandler errorMessageHandler) {
+        sellerTrade.onFiatPaymentReceived(resultHandler, errorMessageHandler);
+
+        //TODO move to trade protocol task
+        accountAgeWitnessService.maybeSignWitness(sellerTrade);
+    }
+
     private void initPendingTrade(Trade trade) {
         initTrade(trade, trade.getProcessModel().isUseSavingsWallet(),
                 trade.getProcessModel().getFundsNeededForTradeAsLong());
@@ -360,12 +369,12 @@ public class TradeManager implements PersistedDataHost {
     private void cleanUpAddressEntries() {
         // We check if we have address entries which are not in our pending trades and clean up those entries.
         // They might be either from closed or failed trades or from trades we do not have at all in our data base files.
-        Set<String> tradesIdSet = getTradesStreamWithFundsLockedIn()
+        Set<String> activeTrades = getTradableList().stream()
                 .map(Tradable::getId)
                 .collect(Collectors.toSet());
 
         btcWalletService.getAddressEntriesForTrade().stream()
-                .filter(e -> !tradesIdSet.contains(e.getOfferId()))
+                .filter(e -> !activeTrades.contains(e.getOfferId()))
                 .forEach(e -> {
                     log.warn("We found an outdated addressEntry for trade {}: entry={}", e.getOfferId(), e);
                     btcWalletService.resetAddressEntriesForPendingTrade(e.getOfferId());

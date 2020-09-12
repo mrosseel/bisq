@@ -237,6 +237,30 @@
     -fx-background-color: -fx-selection-bar;
 }
 
+
+/* list view */
+.list-view .list-cell {
+    -fx-background-color: -bs-background-color;
+}
+.list-view .list-cell:odd {
+    -fx-background-color: derive(-bs-background-color, -5%);
+}
+.list-view .list-cell:even {
+    -fx-background-color: derive(-bs-background-color, 5%);
+}
+.list-view .list-cell:hover,
+.list-view .list-cell:selected,
+.table-view .table-cell:hover,
+.table-view .table-cell:selected {
+    -fx-background: -fx-accent;
+    -fx-background-color: -fx-selection-bar;
+    -fx-border-color: -fx-selection-bar;
+}
+
+.number-column.table-cell {
+    -fx-background-color: -bs-background-color;
+}
+
 .list-view:focused,
 .tree-view:focused,
 .table-view:focused,
@@ -410,6 +434,12 @@ tree-table-view:focused {
 
 .jfx-badge.new .badge-pane {
     -fx-pref-width: 30;
+}
+
+.jfx-badge.auto-conf .badge-pane {
+    -fx-background-color: -xmr-orange;
+    -fx-pref-width: -1;
+    -fx-padding: -1 10 0 10;
 }
 
 .jfx-badge .badge-pane .label {
@@ -786,6 +816,11 @@ tree-table-view:focused {
     -fx-padding: 27 2 0 2;
 }
 
+.alert-icon {
+    -fx-fill: -bs-rd-error-red;
+    -fx-cursor: hand;
+}
+
 .close-icon {
     -fx-fill: -bs-text-color;
 }
@@ -824,6 +859,12 @@ textfield */
 
 #funds-confidence {
     -fx-progress-color: -bs-color-gray-dim;
+    -fx-max-width: 20;
+    -fx-max-height: 20;
+}
+
+#xmr-confidence {
+    -fx-progress-color: -xmr-orange;
     -fx-max-width: 20;
     -fx-max-height: 20;
 }
@@ -867,6 +908,32 @@ textfield */
  * Table                                                                       *
  *                                                                             *
  ******************************************************************************/
+.table-view .table-row-cell:even .table-cell {
+    -fx-background-color: derive(-bs-background-color, 5%);
+    -fx-border-color: derive(-bs-background-color,5%);
+}
+.table-view .table-row-cell:odd .table-cell {
+    -fx-background-color: derive(-bs-background-color,-5%);
+    -fx-border-color: derive(-bs-background-color,-5%);
+}
+.table-view .table-row-cell:hover .table-cell,
+.table-view .table-row-cell:selected .table-cell {
+    -fx-background: -fx-accent;
+    -fx-background-color: -fx-selection-bar;
+    -fx-border-color: -fx-selection-bar;
+}
+.table-row-cell {
+    -fx-border-color: -bs-background-color;
+}
+.table-row-cell:empty, .table-row-cell:empty:even, .table-row-cell:empty:odd {
+    -fx-background-color: -bs-background-color;
+    -fx-min-height: 36;
+}
+.offer-table .table-row-cell {
+    -fx-background: -fx-accent;
+    -fx-background-color: -bs-color-gray-6;
+}
+
 .table-view .table-cell {
     -fx-alignment: center-left;
     -fx-padding: 2 0 2 0;

@@ -102,6 +102,7 @@ public class PendingTradesView extends ActivatableViewAndModel<VBox, PendingTrad
     private final CoinFormatter formatter;
     private final PrivateNotificationManager privateNotificationManager;
     private final boolean useDevPrivilegeKeys;
+    private final boolean useDevModeHeader;
     private final Preferences preferences;
     @FXML
     TableView<PendingTradesListItem> tableView;
@@ -141,13 +142,15 @@ public class PendingTradesView extends ActivatableViewAndModel<VBox, PendingTrad
                              @Named(FormattingUtils.BTC_FORMATTER_KEY) CoinFormatter formatter,
                              PrivateNotificationManager privateNotificationManager,
                              Preferences preferences,
-                             @Named(Config.USE_DEV_PRIVILEGE_KEYS) boolean useDevPrivilegeKeys) {
+                             @Named(Config.USE_DEV_PRIVILEGE_KEYS) boolean useDevPrivilegeKeys,
+                             @Named(Config.USE_DEV_MODE_HEADER) boolean useDevModeHeader) {
         super(model);
         this.tradeDetailsWindow = tradeDetailsWindow;
         this.formatter = formatter;
         this.privateNotificationManager = privateNotificationManager;
         this.preferences = preferences;
         this.useDevPrivilegeKeys = useDevPrivilegeKeys;
+        this.useDevModeHeader = useDevModeHeader;
     }
 
     @Override
@@ -412,7 +415,7 @@ public class PendingTradesView extends ActivatableViewAndModel<VBox, PendingTrad
         });
 
         Scene scene = new Scene(pane);
-        CssTheme.loadSceneStyles(scene, preferences.getCssTheme());
+        CssTheme.loadSceneStyles(scene, preferences.getCssTheme(), useDevModeHeader);
         scene.addEventHandler(KeyEvent.KEY_RELEASED, ev -> {
             if (ev.getCode() == KeyCode.ESCAPE) {
                 ev.consume();
@@ -442,8 +445,26 @@ public class PendingTradesView extends ActivatableViewAndModel<VBox, PendingTrad
         // Delay display to next render frame to avoid that the popup is first quickly displayed in default position
         // and after a short moment in the correct position
         UserThread.execute(() -> chatPopupStage.setOpacity(1));
+        updateChatMessageCount(trade, badgeByTrade.get(trade.getId()));
     }
 
+    private void updateChatMessageCount(Trade trade, JFXBadge badge) {
+        if (!trade.getId().equals(tradeIdOfOpenChat)) {
+            updateNewChatMessagesByTradeMap();
+            long num = newChatMessagesByTradeMap.get(trade.getId());
+            if (num > 0) {
+                badge.setText(String.valueOf(num));
+                badge.setEnabled(true);
+            } else {
+                badge.setText("");
+                badge.setEnabled(false);
+            }
+        } else {
+            badge.setText("");
+            badge.setEnabled(false);
+        }
+        badge.refreshBadge();
+    }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Private
@@ -729,17 +750,17 @@ public class PendingTradesView extends ActivatableViewAndModel<VBox, PendingTrad
                                     }
 
                                     button.setOnAction(e -> {
+                                        tableView.getSelectionModel().select(this.getIndex());
                                         openChat(trade);
-                                        update(trade, badge);
                                     });
 
                                     if (!listenerByTrade.containsKey(id)) {
-                                        ListChangeListener<ChatMessage> listener = c -> update(trade, badge);
+                                        ListChangeListener<ChatMessage> listener = c -> updateChatMessageCount(trade, badge);
                                         listenerByTrade.put(id, listener);
                                         trade.getChatMessages().addListener(listener);
                                     }
 
-                                    update(trade, badge);
+                                    updateChatMessageCount(trade, badge);
 
                                     setGraphic(badge);
                                 } else {
@@ -747,23 +768,6 @@ public class PendingTradesView extends ActivatableViewAndModel<VBox, PendingTrad
                                 }
                             }
 
-                            private void update(Trade trade, JFXBadge badge) {
-                                if (!trade.getId().equals(tradeIdOfOpenChat)) {
-                                    updateNewChatMessagesByTradeMap();
-                                    long num = newChatMessagesByTradeMap.get(trade.getId());
-                                    if (num > 0) {
-                                        badge.setText(String.valueOf(num));
-                                        badge.setEnabled(true);
-                                    } else {
-                                        badge.setText("");
-                                        badge.setEnabled(false);
-                                    }
-                                } else {
-                                    badge.setText("");
-                                    badge.setEnabled(false);
-                                }
-                                badge.refreshBadge();
-                            }
                         };
                     }
                 });

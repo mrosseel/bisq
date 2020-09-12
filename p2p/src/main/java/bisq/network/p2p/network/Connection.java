@@ -48,6 +48,8 @@ import bisq.common.proto.network.NetworkEnvelope;
 import bisq.common.proto.network.NetworkProtoResolver;
 import bisq.common.util.Utilities;
 
+import com.google.protobuf.InvalidProtocolBufferException;
+
 import javax.inject.Inject;
 
 import com.google.common.util.concurrent.MoreExecutors;
@@ -225,7 +227,7 @@ public class Connection implements HasCapabilities, Runnable, MessageListener {
 
     // Called from various threads
     public void sendMessage(NetworkEnvelope networkEnvelope) {
-        log.debug(">> Send networkEnvelope of type: " + networkEnvelope.getClass().getSimpleName());
+        log.debug(">> Send networkEnvelope of type: {}", networkEnvelope.getClass().getSimpleName());
 
         if (!stopped) {
             if (noCapabilityRequiredOrCapabilityIsSupported(networkEnvelope)) {
@@ -235,7 +237,7 @@ public class Connection implements HasCapabilities, Runnable, MessageListener {
                     protobuf.NetworkEnvelope proto = networkEnvelope.toProtoNetworkEnvelope();
                     log.trace("Sending message: {}", Utilities.toTruncatedString(proto.toString(), 10000));
 
-                    if (networkEnvelope instanceof Ping | networkEnvelope instanceof RefreshOfferMessage) {
+                    if (networkEnvelope instanceof Ping || networkEnvelope instanceof RefreshOfferMessage) {
                         // pings and offer refresh msg we don't want to log in production
                         log.trace("\n\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n" +
                                         "Sending direct message to peer" +
@@ -283,12 +285,20 @@ public class Connection implements HasCapabilities, Runnable, MessageListener {
                                     bundleSender.schedule(() -> {
                                         if (!stopped) {
                                             synchronized (lock) {
-                                                BundleOfEnvelopes current = queueOfBundles.poll();
-                                                if (current != null && !stopped) {
-                                                    if (current.getEnvelopes().size() == 1) {
-                                                        protoOutputStream.writeEnvelope(current.getEnvelopes().get(0));
-                                                    } else {
-                                                        protoOutputStream.writeEnvelope(current);
+                                                BundleOfEnvelopes bundle = queueOfBundles.poll();
+                                                if (bundle != null && !stopped) {
+                                                    NetworkEnvelope envelope = bundle.getEnvelopes().size() == 1 ?
+                                                            bundle.getEnvelopes().get(0) :
+                                                            bundle;
+                                                    try {
+                                                        protoOutputStream.writeEnvelope(envelope);
+                                                    } catch (Throwable t) {
+                                                        log.error("Sending envelope of class {} to address {} " +
+                                                                        "failed due {}",
+                                                                envelope.getClass().getSimpleName(),
+                                                                this.getPeersNodeAddressOptional(),
+                                                                t.toString());
+                                                        log.error("envelope: {}", envelope);
                                                     }
                                                 }
                                             }
@@ -319,6 +329,8 @@ public class Connection implements HasCapabilities, Runnable, MessageListener {
         }
     }
 
+    // TODO: If msg is BundleOfEnvelopes we should check each individual message for capability and filter out those
+    //  which fail.
     public boolean noCapabilityRequiredOrCapabilityIsSupported(Proto msg) {
         boolean result;
         if (msg instanceof AddDataMessage) {
@@ -408,12 +420,13 @@ public class Connection implements HasCapabilities, Runnable, MessageListener {
     public void onMessage(NetworkEnvelope networkEnvelope, Connection connection) {
         checkArgument(connection.equals(this));
 
-        if (networkEnvelope instanceof BundleOfEnvelopes)
+        if (networkEnvelope instanceof BundleOfEnvelopes) {
             for (NetworkEnvelope current : ((BundleOfEnvelopes) networkEnvelope).getEnvelopes()) {
                 UserThread.execute(() -> messageListeners.forEach(e -> e.onMessage(current, connection)));
             }
-        else
+        } else {
             UserThread.execute(() -> messageListeners.forEach(e -> e.onMessage(networkEnvelope, connection)));
+        }
     }
 
 
@@ -873,7 +886,7 @@ public class Connection implements HasCapabilities, Runnable, MessageListener {
                     log.error(e.getMessage());
                     e.printStackTrace();
                     reportInvalidRequest(RuleViolation.INVALID_CLASS);
-                } catch (ProtobufferException | NoClassDefFoundError e) {
+                } catch (ProtobufferException | NoClassDefFoundError | InvalidProtocolBufferException e) {
                     log.error(e.getMessage());
                     e.printStackTrace();
                     reportInvalidRequest(RuleViolation.INVALID_DATA_TYPE);
