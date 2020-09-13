@@ -73,6 +73,7 @@ services:
             -maxconnections=800
             -timeout=30000
             -listen=0
+            -peerbloomfilters=1
             -rpcuser=${RPC_USER}
             -rpcpassword=${RPC_PASSWORD}
             -rpcallowip=0.0.0.0/0
@@ -95,6 +96,7 @@ services:
             dockerfile: docker/prod/Dockerfile-nginx
         image: bisq/nginx
         container_name: nginx
+        restart: unless-stopped
         depends_on:
             - collectd
         expose:
